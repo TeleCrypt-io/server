@@ -1127,8 +1127,11 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(no_marker.returncode, 0)
-            self.assertEqual(no_marker.stdout, "container-runtime\n")
+            self.assertEqual(no_marker.stdout, "unknown\n")
             self.assertEqual(no_marker.stderr, "")
+            self.assertEqual(
+                stderr_file.read_text(encoding="utf-8"), "warning: private diagnostic\n"
+            )
 
             preflight_cases = {
                 "Error response from daemon: manifest unknown: private-fixture": "image-pull",
@@ -1199,8 +1202,12 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(generic_preflight.returncode, 0)
-            self.assertEqual(generic_preflight.stdout, "container-runtime\n")
+            self.assertEqual(generic_preflight.stdout, "unknown\n")
             self.assertEqual(generic_preflight.stderr, "")
+            self.assertEqual(
+                preflight_file.read_text(encoding="utf-8"),
+                "private fixture only: ci-secret-fixture\n",
+            )
             self.assertNotIn("ci-secret-fixture", generic_preflight.stdout + generic_preflight.stderr)
 
             preflight_file.write_text("", encoding="utf-8")

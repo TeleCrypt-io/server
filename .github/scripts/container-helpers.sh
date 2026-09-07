@@ -31,7 +31,7 @@ container_sensitive_marker_class() {
 
 container_sensitive_preflight_failure_class() {
   case "${1:-}" in
-    image-pull|registry-auth|mount-source|entrypoint-executable|compose-secrets|compose-config|runtime-permission|file-shape|oci-runtime|daemon-resource|timeout|container-runtime)
+    image-pull|registry-auth|mount-source|entrypoint-executable|compose-secrets|compose-config|runtime-permission|file-shape|oci-runtime|daemon-resource|timeout|unknown)
       printf '%s\n' "$1"
       ;;
     *) return 1 ;;
@@ -93,7 +93,7 @@ container_sensitive_preflight_class() {
   if [[ -n "$candidate" ]]; then
     container_sensitive_preflight_failure_class "$candidate"
   elif [[ -s "$stderr_file" ]]; then
-    printf '%s\n' 'container-runtime'
+    printf '%s\n' 'unknown'
   else
     return 1
   fi
