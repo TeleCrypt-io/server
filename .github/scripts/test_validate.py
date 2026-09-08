@@ -1018,6 +1018,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
 
             failed = run("import sys; sys.stdout.write('partial\\n'); sys.stderr.write('ordinary diagnostic\\n'); raise SystemExit(17)")
             self.assertEqual(failed.returncode, 17, failed.stderr)
+            self.assertIn("partial", failed.stderr)
             self.assertIn("ordinary diagnostic", failed.stderr)
 
             timed_out = run("import time; time.sleep(60)", timeout=1)
@@ -1034,8 +1035,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
         docker_value_start = workflow.index("docker_value()")
         docker_value_end = workflow.index("\n          }", docker_value_start)
         docker_value = workflow[docker_value_start:docker_value_end]
-        self.assertIn("if container_command", docker_value)
-        self.assertIn('return "$status"', docker_value)
+        self.assertIn('container_command "$output" 60 docker "$@" | tr', docker_value)
         cleanup_container_start = workflow.index("cleanup_container()")
         cleanup_start = workflow.index("cleanup() {", cleanup_container_start)
         cleanup_container = workflow[cleanup_container_start:cleanup_start]

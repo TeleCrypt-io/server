@@ -269,15 +269,9 @@ jobs:
           }
 
           docker_value() {
-            local output="$1" status
+            local output="$1"
             shift
-            if container_command "$output" 60 docker "$@"; then
-              status=0
-            else
-              status=$?
-            fi
-            (( status == 0 )) || return "$status"
-            tr -d '\r\n' <"$output"
+            container_command "$output" 60 docker "$@" | tr -d '\r\n'
           }
           if ! container_command --sensitive "$mas_output" 120 docker compose --ansi never --env-file .env.example \
             -f .github/secret-proof.compose.yml run \

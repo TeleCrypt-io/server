@@ -277,7 +277,7 @@ container_command() {
         replay_status=1
       fi
     else
-      if ! cat -- "$output"; then replay_status=1; fi
+      if ! cat -- "$output" >&2; then replay_status=1; fi
       if ! cat -- "$stderr_file" >&2; then replay_status=1; fi
     fi
     if (( replay_status != 0 )); then
