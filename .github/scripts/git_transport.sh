@@ -10,9 +10,6 @@ readonly REPOSITORY='TeleCrypt-io/server_state'
 # fetch target retains it. Both exact forms identify the same canonical repository.
 readonly REMOTE_NO_SUFFIX='https://github.com/TeleCrypt-io/server_state'
 readonly REMOTE='https://github.com/TeleCrypt-io/server_state.git'
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly SCRIPT_DIR
-
 die() { printf 'git transport refused: %s\n' "$1" >&2; exit 64; }
 
 [[ -x "$GIT" ]] || die 'trusted Git executable is unavailable'
@@ -58,17 +55,12 @@ readonly GIT_OPTIONS=(
 )
 
 git_safe() {
-  local temporary status
-  temporary="$(mktemp -d "${TMPDIR:-/tmp}/server-state-git.XXXXXX")"
+  local status
   set +e
-  bash "$SCRIPT_DIR/run_bounded_combined.sh" --separate \
-    $((64 * 1024)) $((64 * 1024)) "$temporary/stdout" "$temporary/stderr" 30 \
+  timeout --signal=TERM --kill-after=5s 30s \
     "$GIT" "${GIT_OPTIONS[@]}" "$@"
   status=$?
   set -e
-  cat -- "$temporary/stdout"
-  cat -- "$temporary/stderr" >&2
-  rm -rf -- "$temporary"
   return "$status"
 }
 
@@ -164,7 +156,7 @@ case "${1:-}" in
     reject_local_transport_config
     shift 2
     for refspec; do validate_refspec "$refspec"; done
-    git_safe fetch --quiet --force --no-tags "$REMOTE" "$@"
+    git_safe fetch --force --no-tags "$REMOTE" "$@"
     ;;
   ls-remote)
     [[ $# -ge 3 && "$2" == "$REPOSITORY" ]] || die 'ls-remote requires the canonical repository'
@@ -174,7 +166,7 @@ case "${1:-}" in
       [[ "$ref" =~ ^refs/tags/([A-Za-z0-9._/-]+)$ ]] || die 'Git remote reference is malformed'
       validate_tag "${BASH_REMATCH[1]}"
     done
-    git_safe ls-remote --quiet --exit-code "$REMOTE" "$@"
+    git_safe ls-remote --exit-code "$REMOTE" "$@"
     ;;
   *) die 'unsupported operation' ;;
 esac

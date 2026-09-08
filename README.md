@@ -2,6 +2,10 @@
 
 Public runtime configuration for the TeleCrypt Matrix service:
 
+Current TeleCrypt project facts and decisions are maintained only in the canonical
+[`llms.txt`](https://telecrypt.io/llms.txt); this README documents this repository's deployment
+composition and release contract.
+
 - Synapse homeserver with closed federation.
 - A TeleCrypt Synapse image containing the exact-version Controlplane policy-module wheel.
 - Matrix Authentication Service (MAS / MSC3861).
@@ -56,7 +60,7 @@ credentials, database URIs, OAuth client secrets, and provider values remain out
 The configured Matrix server name serves discovery. Only the production profile redirects ordinary
 web traffic to the production-only landing site at `https://www.telecrypt.io`; the stage profile has
 no public website and returns a bounded 404 for other apex requests. The only accepted public
-identities are the exact production and future stage names; their backend and Storage hosts derive
+identities are the exact production and stage names; their backend and Storage hosts derive
 directly from `SERVER_NAME`, while billing mode derives only from `BILLING_ENVIRONMENT`. Neither is
 a separate provider or secret-file override.
 Registration has no host publication and is attached to a dedicated Caddy edge network plus its

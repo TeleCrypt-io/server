@@ -54,6 +54,9 @@ class ManifestTests(unittest.TestCase):
         for service in ("janitor", "plan", "cashier"):
             body = validate.service_section(compose, service)
             self.assertIn("BILLING_ENVIRONMENT=${BILLING_ENVIRONMENT:?set BILLING_ENVIRONMENT}", body)
+        self.assertNotIn("max-size", compose)
+        self.assertNotIn("max-file", compose)
+        self.assertNotRegex(compose, r"(?m)^\s*logging:\s*$")
 
     def test_janitor_dry_run_policy_is_documented_for_test_profiles(self) -> None:
         readme = (Path(__file__).resolve().parents[2] / "README.md").read_text(encoding="utf-8")
@@ -701,6 +704,18 @@ class GitTransportTests(unittest.TestCase):
         self.assertNotIn("-c http.sslCert=", helper)
         self.assertNotIn("-c http.sslKey=", helper)
 
+    def test_remote_operations_keep_git_diagnostics(self) -> None:
+        helper = HELPER.read_text(encoding="utf-8")
+        self.assertIn("git_safe fetch --force --no-tags", helper)
+        self.assertIn("git_safe ls-remote --exit-code", helper)
+        self.assertNotIn("git_safe fetch --quiet", helper)
+        self.assertNotIn("git_safe ls-remote --quiet", helper)
+
+    def test_diagnostic_classifiers_keep_reader_errors_visible(self) -> None:
+        helper = CONTAINER_HELPER.read_text(encoding="utf-8")
+        self.assertNotIn('"$output" 2>/dev/null', helper)
+        self.assertNotIn('"$stderr_file" 2>/dev/null', helper)
+
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory(prefix="server-state-git-")
         self.root = Path(self.directory.name)
@@ -828,6 +843,8 @@ class GitTransportTests(unittest.TestCase):
 class ReleaseEvidenceTests(unittest.TestCase):
     def test_container_commands_use_the_step_scoped_diagnostics_classifier(self) -> None:
         workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
+        self.assertIn('"$mas_mounts" >/dev/null', workflow)
+        self.assertNotIn('"$mas_mounts" >/dev/null 2>&1', workflow)
         lines = workflow.splitlines()
         blocks: list[list[str]] = []
         block: list[str] = []
@@ -856,12 +873,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
                     any("source .github/scripts/container-helpers.sh" in prior for prior in block[: index + 1]),
                     block[0],
                 )
-                self.assertIn("container_bounded", "\n".join(block[start : index + 1]), line)
+                self.assertIn("container_command", "\n".join(block[start : index + 1]), line)
         self.assertGreater(invocation_count, 0)
-        self.assertNotRegex(
-            workflow,
-            r"run_bounded_combined\.sh[^\n]*(?:\bdocker\b|\bskopeo\b)",
-        )
+        self.assertNotIn("run_bounded_combined.sh", workflow)
 
     def test_stdin_inheritance_is_reserved_for_registry_login(self) -> None:
         workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
@@ -869,8 +883,8 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertIn('authfile="$authdir/auth.json"', workflow)
         self.assertIn('rm -rf "$authdir" "$metadata_dir" "$manifest_path"', workflow)
         self.assertNotIn('authfile="$(mktemp)"', workflow)
-        self.assertEqual(workflow.count("container_bounded --sensitive --inherit-stdin"), 1)
-        login_start = workflow.index("container_bounded --sensitive --inherit-stdin")
+        self.assertEqual(workflow.count("container_command --sensitive --inherit-stdin"), 1)
+        login_start = workflow.index("container_command --sensitive --inherit-stdin")
         login_end = workflow.index("\n", login_start)
         login_line = workflow[login_start:login_end]
         self.assertIn("skopeo login", login_line)
@@ -926,7 +940,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 f"AUTHFILE_STATE={shlex.quote(str(authfile_state))} "
                 f"TOKEN_CAPTURE={shlex.quote(str(token_capture))} "
                 f"export AUTHFILE_STATE TOKEN_CAPTURE; "
-                f"printf '%s' \"$registry_token\" | container_bounded --sensitive --inherit-stdin 65536 "
+                f"printf '%s' \"$registry_token\" | container_command --sensitive --inherit-stdin "
                 f"{shlex.quote(str(login_output))} 30 skopeo login --authfile \"$authfile\" "
                 "--username actor --password-stdin ghcr.io"
             )
@@ -945,9 +959,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
 
     def test_secret_bearing_compose_inspection_is_non_emitting(self) -> None:
         workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        self.assertIn('container_bounded --sensitive 1048576 "$rendered_compose"', workflow)
-        self.assertIn('container_bounded --sensitive 65536 "$raw_images_file"', workflow)
-        self.assertIn('container_bounded --sensitive 65536 "$image_list"', workflow)
+        self.assertIn('container_command --sensitive "$rendered_compose"', workflow)
+        self.assertIn('container_command --sensitive "$raw_images_file"', workflow)
+        self.assertIn('container_command --sensitive "$image_list"', workflow)
 
     def test_container_diagnostics_accept_progress_and_reject_hostile_markers(self) -> None:
         with tempfile.TemporaryDirectory(prefix="server-state-container-diagnostics-") as directory:
@@ -955,7 +969,6 @@ class ReleaseEvidenceTests(unittest.TestCase):
 
             def run(
                 code: str,
-                max_bytes: int = 65536,
                 timeout: int = 10,
                 *,
                 sensitive: bool = False,
@@ -964,7 +977,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 option = "--sensitive " if sensitive else ""
                 command = (
                     f"source {shlex.quote(str(CONTAINER_HELPER))}; "
-                    f"container_bounded {option}{max_bytes} {shlex.quote(str(output))} {timeout} "
+                    f"container_command {option}{shlex.quote(str(output))} {timeout} "
                     f"/usr/bin/python3 -c {shlex.quote(code)}"
                 )
                 return subprocess.run(
@@ -984,10 +997,10 @@ class ReleaseEvidenceTests(unittest.TestCase):
 
             for marker in ("warning", "WARN", "error", "fatal", "failure", "denied", "unauthorized"):
                 result = run(f"import sys; sys.stdout.write('partial\\n'); sys.stderr.write('{marker}: hostile fixture\\n')")
-                self.assertEqual(result.returncode, 1, marker)
+                self.assertEqual(result.returncode, 0, marker)
                 self.assertEqual(result.stdout, "partial\n", marker)
                 self.assertIn("hostile fixture", result.stderr, marker)
-                self.assertIn("failure diagnostics", result.stderr, marker)
+                self.assertNotIn("failure diagnostics", result.stderr, marker)
 
             boundary = run("import sys; sys.stderr.write('warningish error_code\\n')")
             self.assertEqual(boundary.returncode, 0, boundary.stderr)
@@ -998,20 +1011,17 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 "sys.stderr.write('warning: private stderr\\n')",
                 sensitive=True,
             )
-            self.assertEqual(sensitive.returncode, 1)
-            self.assertNotIn("private", sensitive.stdout + sensitive.stderr)
+            self.assertEqual(sensitive.returncode, 0)
+            self.assertIn("private [redacted]", sensitive.stdout + sensitive.stderr)
+            self.assertNotIn("stdout", sensitive.stdout + sensitive.stderr)
+            self.assertNotIn("stderr", sensitive.stdout + sensitive.stderr)
 
             failed = run("import sys; sys.stdout.write('partial\\n'); sys.stderr.write('ordinary diagnostic\\n'); raise SystemExit(17)")
             self.assertEqual(failed.returncode, 17, failed.stderr)
             self.assertIn("ordinary diagnostic", failed.stderr)
 
-            overflow = run("import sys; sys.stderr.write('x' * 70000)", max_bytes=1024)
-            self.assertNotEqual(overflow.returncode, 0)
-            self.assertIn("bounded command output exceeded its limit", overflow.stderr)
-
             timed_out = run("import time; time.sleep(60)", timeout=1)
             self.assertEqual(timed_out.returncode, 124, timed_out.stderr)
-            self.assertIn("bounded command timed out", timed_out.stderr)
 
     def test_secret_proof_cleanup_and_value_reads_preserve_failures(self) -> None:
         workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
@@ -1021,11 +1031,21 @@ class ReleaseEvidenceTests(unittest.TestCase):
             'docker rm -f "$mas_container" "$missing_container" >/dev/null || true',
             workflow,
         )
-        bounded_value_start = workflow.index("bounded_docker_value()")
-        bounded_value_end = workflow.index("\n          }", bounded_value_start)
-        bounded_value = workflow[bounded_value_start:bounded_value_end]
-        self.assertIn("if container_bounded", bounded_value)
-        self.assertIn('return "$status"', bounded_value)
+        docker_value_start = workflow.index("docker_value()")
+        docker_value_end = workflow.index("\n          }", docker_value_start)
+        docker_value = workflow[docker_value_start:docker_value_end]
+        self.assertIn("if container_command", docker_value)
+        self.assertIn('return "$status"', docker_value)
+        cleanup_container_start = workflow.index("cleanup_container()")
+        cleanup_start = workflow.index("cleanup() {", cleanup_container_start)
+        cleanup_container = workflow[cleanup_container_start:cleanup_start]
+        cleanup = workflow[cleanup_start:workflow.index("cleanup_on_exit()", cleanup_start)]
+        self.assertIn('if ! rm -f -- "$lookup_output" "$lookup_output.stderr"; then', cleanup_container)
+        self.assertIn('return "$status"', cleanup_container)
+        self.assertIn('if ! rm -f -- "$mas_output"', cleanup)
+        self.assertIn('"$mas_user_output" "$mas_user_output.stderr"', cleanup)
+        self.assertIn('status=1', cleanup)
+        self.assertIn('if [[ "$status" -eq 0 ]]; then', workflow)
 
     def test_sensitive_proof_failures_have_fixed_classes_without_diagnostics(self) -> None:
         classifications = {
@@ -1225,7 +1245,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(unknown_preflight.returncode, 0)
-            self.assertEqual(unknown_preflight.stdout, "bounded-command\n")
+            self.assertEqual(unknown_preflight.stdout, "command-failure\n")
             self.assertEqual(unknown_preflight.stderr, "")
 
             output = root / "proof"
@@ -1234,7 +1254,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                     "/bin/bash",
                     "-c",
                     f"source {shlex.quote(str(CONTAINER_HELPER))}; "
-                    f"container_bounded --sensitive 1024 {shlex.quote(str(output))} 10 "
+                    f"container_command --sensitive {shlex.quote(str(output))} 10 "
                     "/usr/bin/python3 -c 'raise SystemExit(71)'",
                 ],
                 cwd=root,
@@ -1252,7 +1272,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                     "/bin/bash",
                     "-c",
                     f"source {shlex.quote(str(CONTAINER_HELPER))}; "
-                    f"container_bounded --sensitive 1024 {shlex.quote(str(redirected_output))} 10 "
+                    f"container_command --sensitive {shlex.quote(str(redirected_output))} 10 "
                     "/usr/bin/python3 -c 'print(\"telecrypt-synapse-proof:uid\")' >/dev/null",
                 ],
                 cwd=root,
@@ -1281,13 +1301,16 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "config-output-read",
             "container-user-inspection",
             "container-user-contract",
+            "mount-inspection",
+            "mount-contract",
             "output-secret-isolation",
-            "missing-signing-path-accepted",
-            "missing-signing-path-timeout",
             "cleanup",
         ):
             self.assertIn(f"mas_failure {phase}", workflow)
-        self.assertIn('echo "MAS secret proof failed: $1; sensitive diagnostics were withheld"', workflow)
+        self.assertIn('([.[].Destination] | sort) == ["/config.yaml", "/runtime-identity.yaml", "/secrets.json"]', workflow)
+        self.assertIn('all(.[]; .RW == false)', workflow)
+        self.assertNotIn("--config=/signing.key", workflow)
+        self.assertIn('echo "MAS secret proof failed: $1"', workflow)
         self.assertIn("allowed_config_paths", workflow)
         self.assertIn("contextlib.redirect_stdout", workflow)
         self.assertIn("contextlib.redirect_stderr", workflow)
@@ -1325,18 +1348,19 @@ class ReleaseEvidenceTests(unittest.TestCase):
         loader_end = workflow.index("Verify exact selected container images", loader_start)
         loader_block = workflow[loader_start:loader_end]
         self.assertIn(
-            "          ' >/dev/null; then\n"
+            "          '; then\n"
             "            synapse_loader_status=0\n"
             "          else\n"
             "            synapse_loader_status=$?\n"
             "          fi",
             loader_block,
         )
-        self.assertNotIn("if ! container_bounded", loader_block)
+        self.assertNotIn("if ! container_command", loader_block)
+        self.assertNotRegex(workflow, r"container_command[^\n]*>\s*/dev/null")
         self.assertNotIn("Synapse config loader returned no config", workflow)
         self.assertNotIn("str(error)", workflow)
         self.assertNotIn("repr(error)", workflow)
-        self.assertIn('echo "Synapse JSON loader proof failed: $1; sensitive diagnostics were withheld"', workflow)
+        self.assertIn('echo "Synapse JSON loader proof failed: $1"', workflow)
 
         proof_compose = yaml.safe_load((Path(__file__).resolve().parents[1] / "secret-proof.compose.yml").read_text(encoding="utf-8"))
         canonical_compose = yaml.safe_load((Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8"))
@@ -1534,12 +1558,13 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.assertIn(f"tag={synapse_tag}", result.stderr)
             self.assertNotIn("offline-test-token", result.stdout + result.stderr)
 
-    def test_release_workflow_uses_bounded_machine_http_status_checks(self) -> None:
+    def test_release_workflow_uses_complete_machine_http_status_checks(self) -> None:
         workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
         self.assertIn("gh api --include", workflow)
         self.assertIn("http_status", workflow)
-        self.assertIn("bounded_gh", workflow)
-        self.assertIn("bounded-command.py", Path(__file__).with_name("run_bounded_combined.sh").read_text(encoding="utf-8"))
+        self.assertIn("capture_command", workflow)
+        self.assertNotIn("capture_external", workflow)
+        self.assertNotIn("bounded-command.py", workflow)
         self.assertNotRegex(workflow, r"grep -Eiq '.*404")
         self.assertEqual(workflow.count('.label == ""'), 2)
         self.assertNotIn(".label == null", workflow)
@@ -1547,9 +1572,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
     def test_release_workflow_discovers_complete_unique_draft_by_numeric_id(self) -> None:
         workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
         self.assertIn("releases?per_page=100&page=$page", workflow)
-        self.assertIn("--jq '[.[] | {id,tag_name,draft}]'", workflow)
-        self.assertIn("max_release_pages=100", workflow)
-        self.assertIn("Release list completeness cannot be proven", workflow)
+        self.assertNotIn("--jq '[.[] | {id,tag_name,draft}]'", workflow)
+        self.assertNotIn("max_release_pages", workflow)
+        self.assertNotIn("bounded page limit", workflow)
         self.assertIn("match_count", workflow)
         self.assertIn("get_release_by_id", workflow)
         self.assertIn("release_id", workflow)
@@ -1560,59 +1585,14 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertNotIn("gh release upload", workflow)
         self.assertNotIn("gh release edit", workflow)
 
-    def test_product_release_fetch_rejects_oversized_api_response(self) -> None:
+    def test_product_release_fetch_keeps_complete_api_response(self) -> None:
         script = Path(__file__).parent / "fetch_product_releases.sh"
-        with tempfile.TemporaryDirectory(prefix="server-state-gh-") as directory:
-            root = Path(directory)
-            fake_gh = root / "gh"
-            fake_gh.write_text(
-                "#!/bin/sh\n"
-                "head -c 1100000 /dev/zero\n",
-                encoding="utf-8",
-            )
-            fake_gh.chmod(0o755)
-            metadata = root / "metadata"
-            result = subprocess.run(
-                ["/bin/bash", str(script)],
-                cwd=script.parents[2],
-                env={
-                    **os.environ,
-                    "PATH": f"{root}:{os.environ['PATH']}",
-                    "GH_TOKEN": "offline-test-token",
-                    "METADATA_DIR": str(metadata),
-                },
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-            self.assertNotEqual(result.returncode, 0)
+        text = script.read_text(encoding="utf-8")
+        self.assertNotIn("MAX_RELEASE_JSON_BYTES", text)
+        self.assertNotIn('max_bytes="$1"', text)
+        self.assertIn('MAX_RELEASE_ASSET_BYTES=1048576', text)
 
-    def test_bounded_combined_allows_large_child_work_file(self) -> None:
-        script = Path(__file__).parent / "run_bounded_combined.sh"
-        with tempfile.TemporaryDirectory(prefix="server-state-bounded-") as directory:
-            root = Path(directory)
-            output = root / "output"
-            result = subprocess.run(
-                [
-                    "/bin/bash",
-                    str(script),
-                    str(output),
-                    "/usr/bin/python3",
-                    "-c",
-                    "from pathlib import Path; Path('work.bin').write_bytes(b'x' * 131072); print('ok')",
-                ],
-                cwd=root,
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(output.read_text(encoding="utf-8").strip(), "ok")
-            self.assertEqual((root / "work.bin").stat().st_size, 131072)
-
-    def test_bounded_container_explicit_stdin_inheritance_is_secret_safe(self) -> None:
+    def test_container_command_explicit_stdin_inheritance_is_secret_safe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="server-state-stdin-") as directory:
             root = Path(directory)
             output = root / "output"
@@ -1624,7 +1604,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             )
             command = (
                 f"source {shlex.quote(str(CONTAINER_HELPER))}; "
-                f"container_bounded --sensitive --inherit-stdin 1024 {shlex.quote(str(output))} 10 "
+                f"container_command --sensitive --inherit-stdin {shlex.quote(str(output))} 10 "
                 f"/usr/bin/python3 -c {shlex.quote(child)}"
             )
             result = subprocess.run(
@@ -1642,7 +1622,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.assertEqual(output.read_text(encoding="utf-8"), secret)
             self.assertEqual(Path(f"{output}.stderr").read_text(encoding="utf-8"), secret)
 
-    def test_bounded_container_keeps_stdin_closed_by_default(self) -> None:
+    def test_container_command_keeps_stdin_closed_by_default(self) -> None:
         with tempfile.TemporaryDirectory(prefix="server-state-stdin-closed-") as directory:
             root = Path(directory)
             output = root / "output"
@@ -1650,7 +1630,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             child = "import sys; assert sys.stdin.read() == ''; print('stdin closed')"
             command = (
                 f"source {shlex.quote(str(CONTAINER_HELPER))}; "
-                f"container_bounded 1024 {shlex.quote(str(output))} 10 "
+                f"container_command {shlex.quote(str(output))} 10 "
                 f"/usr/bin/python3 -c {shlex.quote(child)}"
             )
             result = subprocess.run(
@@ -1666,31 +1646,6 @@ class ReleaseEvidenceTests(unittest.TestCase):
             transcript = result.stdout + result.stderr + output.read_text(encoding="utf-8")
             self.assertIn("stdin closed", transcript)
             self.assertNotIn(secret, transcript)
-
-    def test_bounded_combined_enforces_one_aggregate_limit(self) -> None:
-        script = Path(__file__).parent / "run_bounded_combined.sh"
-        with tempfile.TemporaryDirectory(prefix="server-state-combined- bound-") as directory:
-            output = Path(directory) / "output"
-            result = subprocess.run(
-                ["/bin/bash", str(script), "--max-bytes", "1024", str(output),
-                 "/usr/bin/python3", "-c", "import sys; sys.stdout.write('x' * 1024); sys.stderr.write('y')"],
-                capture_output=True, text=True, timeout=10, check=False,
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertLessEqual(output.stat().st_size, 1024)
-
-    def test_bounded_combined_kills_inherited_descriptor_descendants(self) -> None:
-        script = Path(__file__).parent / "run_bounded_combined.sh"
-        with tempfile.TemporaryDirectory(prefix="server-state-descendant-") as directory:
-            output = Path(directory) / "output"
-            result = subprocess.run(
-                ["/bin/bash", str(script), "--max-bytes", "1024", str(output),
-                 "/usr/bin/python3", "-c",
-                 "import os, subprocess, sys; descendant=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); print('leader'); sys.stdout.flush(); os._exit(0)"],
-                capture_output=True, text=True, timeout=10, check=False,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(output.read_text(encoding="utf-8"), "leader\n")
 
 
 if __name__ == "__main__":

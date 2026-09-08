@@ -52,8 +52,8 @@ jobs:
         run: |
           set -euo pipefail
           source .github/scripts/container-helpers.sh
-          engine_version="$(container_bounded 65536 "$RUNNER_TEMP/engine-version" 60 docker version --format '{{.Server.Version}}' | tr -d '\r\n')"
-          compose_version="$(container_bounded 65536 "$RUNNER_TEMP/compose-version" 60 docker compose version --short | tr -d '\r\n')"
+          engine_version="$(container_command "$RUNNER_TEMP/engine-version" 60 docker version --format '{{.Server.Version}}' | tr -d '\r\n')"
+          compose_version="$(container_command "$RUNNER_TEMP/compose-version" 60 docker compose version --short | tr -d '\r\n')"
           python3 .github/scripts/validate.py toolchain "$engine_version" "$compose_version"
 
       - name: Authenticate package registry for exact manifest checks
@@ -75,8 +75,8 @@ jobs:
           while IFS= read -r image; do
             [ -n "$image" ] || continue
             inspection_file="$RUNNER_TEMP/server-state-image-inspection"
-            if ! container_bounded 65536 "$inspection_file" 60 \
-              docker manifest inspect "$image" >/dev/null; then
+            if ! container_command "$inspection_file" 60 \
+              docker manifest inspect "$image"; then
               printf '%s\n' "$image" >>"$failures_file"
               printf 'image manifest unavailable: %s\n' "$image" >&2
             fi
@@ -128,10 +128,9 @@ jobs:
           install -m 444 .github/fixtures/synapse-signing-fixture.txt "$fixture_secrets/synapse_signing.key"
           install -m 444 .github/fixtures/mas.secrets.json "$fixture_secrets/mas.secrets.json"
           rendered_compose="$RUNNER_TEMP/server-state-compose.json"
-          container_bounded --sensitive 1048576 "$rendered_compose" 120 \
-            docker compose --profile janitor --env-file .env.example config --format json >/dev/null
+          container_command --sensitive "$rendered_compose" 120 \
+            docker compose --profile janitor --env-file .env.example config --format json
           rm -f -- "$rendered_compose.stderr"
-          test "$(wc -c <"$rendered_compose")" -le 1048576
           printf 'COMPOSE_RENDERED_JSON=%s\n' "$rendered_compose" >> "$GITHUB_ENV"
 
       - name: Verify rendered Compose closed contracts
@@ -143,7 +142,7 @@ jobs:
           set -euo pipefail
           source .github/scripts/container-helpers.sh
           synapse_output="$RUNNER_TEMP/synapse-secret-proof.log"
-          if container_bounded --sensitive 65536 "$synapse_output" 120 docker compose --ansi never --env-file .env.example \
+          if container_command --sensitive "$synapse_output" 120 docker compose --ansi never --env-file .env.example \
             -f .github/secret-proof.compose.yml run --rm --no-deps -T \
             --entrypoint python synapse-secret-proof -c '
           import os
@@ -189,7 +188,7 @@ jobs:
               if value in environment.values():
                   fail(74, "environment-leak")
           print("telecrypt-synapse-proof:success", flush=True)
-          ' >/dev/null; then
+          '; then
             proof_status=0
           else
             proof_status=$?
@@ -197,7 +196,7 @@ jobs:
           proof_class="$(container_sensitive_proof_class "$proof_status" "$synapse_output" "$synapse_output.stderr")"
           if [[ "$proof_class" != success ]]; then
             rm -f -- "$synapse_output" "$synapse_output.stderr"
-            printf 'Synapse secret proof failed: %s; sensitive diagnostics were withheld\n' "$proof_class" >&2
+            printf 'Synapse secret proof failed: %s\n' "$proof_class" >&2
             exit 1
           fi
           rm -f -- "$synapse_output" "$synapse_output.stderr"
@@ -223,48 +222,56 @@ jobs:
           EOF
 
           mas_container=ci-mas-secret-proof
-          missing_container=ci-mas-synapse-secret-proof
           mas_output="$RUNNER_TEMP/mas-secret-proof.log"
-          missing_output_file="$RUNNER_TEMP/mas-missing-secret-proof.log"
+          mas_user_output="$RUNNER_TEMP/mas-user"
+          mas_mounts="$RUNNER_TEMP/mas-secret-mounts.json"
           cleanup_output="$RUNNER_TEMP/mas-secret-cleanup.log"
           cleanup_container() {
-            local container="$1" lookup_output="$RUNNER_TEMP/mas-cleanup-$1.log" container_id
-            if ! container_bounded 65536 "$lookup_output" 30 docker ps -aq --filter "name=^/$container$" >/dev/null; then
-              rm -f -- "$lookup_output" "$lookup_output.stderr"
-              return 1
+            local container="$1" lookup_output="$RUNNER_TEMP/mas-cleanup-$1.log" container_id status=0
+            if ! container_command "$lookup_output" 30 docker ps -aq --filter "name=^/$container$"; then
+              status=1
+            elif ! container_id="$(tr -d '\r\n' <"$lookup_output")"; then
+              status=1
+            elif [[ -n "$container_id" ]] && ! container_command "$cleanup_output" 30 docker rm -f "$container_id"; then
+              status=1
             fi
-            container_id="$(tr -d '\r\n' <"$lookup_output")"
-            rm -f -- "$lookup_output" "$lookup_output.stderr"
-            [[ -z "$container_id" ]] || container_bounded 65536 "$cleanup_output" 30 docker rm -f "$container_id" >/dev/null
+            if ! rm -f -- "$lookup_output" "$lookup_output.stderr"; then
+              status=1
+            fi
+            return "$status"
           }
           cleanup() {
             local status=0
             cleanup_container "$mas_container" || status=1
-            cleanup_container "$missing_container" || status=1
-            rm -f -- "$mas_output" "$mas_output.stderr" "$missing_output_file" "$missing_output_file.stderr" \
-              "$cleanup_output" "$cleanup_output.stderr"
+            if ! rm -f -- "$mas_output" "$mas_output.stderr" "$mas_user_output" "$mas_user_output.stderr" \
+              "$mas_mounts" "$mas_mounts.stderr" \
+              "$cleanup_output" "$cleanup_output.stderr"; then
+              status=1
+            fi
             return "$status"
           }
           cleanup_on_exit() {
             local status=$?
             trap - EXIT
             if ! cleanup; then
-              echo "MAS secret proof failed: cleanup; sensitive diagnostics were withheld" >&2
-              exit 1
+              echo 'MAS secret proof failed: cleanup' >&2
+              if [[ "$status" -eq 0 ]]; then
+                status=1
+              fi
             fi
             exit "$status"
           }
           trap cleanup_on_exit EXIT
 
           mas_failure() {
-            echo "MAS secret proof failed: $1; sensitive diagnostics were withheld" >&2
+            echo "MAS secret proof failed: $1" >&2
             exit 1
           }
 
-          bounded_docker_value() {
+          docker_value() {
             local output="$1" status
             shift
-            if container_bounded 65536 "$output" 60 docker "$@" >/dev/null; then
+            if container_command "$output" 60 docker "$@"; then
               status=0
             else
               status=$?
@@ -272,20 +279,31 @@ jobs:
             (( status == 0 )) || return "$status"
             tr -d '\r\n' <"$output"
           }
-          if ! container_bounded --sensitive 65536 "$mas_output" 120 docker compose --ansi never --env-file .env.example \
+          if ! container_command --sensitive "$mas_output" 120 docker compose --ansi never --env-file .env.example \
             -f .github/secret-proof.compose.yml run \
             --name "$mas_container" --no-deps -T --entrypoint /usr/local/bin/mas-cli mas-secret-proof \
-            config check --config=/config.yaml --config=/secrets.json --config=/runtime-identity.yaml >/dev/null; then
+            config check --config=/config.yaml --config=/secrets.json --config=/runtime-identity.yaml; then
             mas_failure config-check
           fi
           if ! mas_check="$(<"$mas_output")"; then
             mas_failure config-output-read
           fi
-          if ! mas_user="$(bounded_docker_value "$RUNNER_TEMP/mas-user" inspect --format '{{.Config.User}}' "$mas_container")"; then
+          if ! mas_user="$(docker_value "$mas_user_output" inspect --format '{{.Config.User}}' "$mas_container")"; then
             mas_failure container-user-inspection
           fi
           if [[ "$mas_user" != "991:991" ]]; then
             mas_failure container-user-contract
+          fi
+          if ! container_command --sensitive "$mas_mounts" 60 docker inspect \
+            --format '{{json .Mounts}}' "$mas_container"; then
+            mas_failure mount-inspection
+          fi
+          if ! jq -e '
+            type == "array" and length == 3 and
+            ([.[].Destination] | sort) == ["/config.yaml", "/runtime-identity.yaml", "/secrets.json"] and
+            all(.[]; .RW == false)
+          ' "$mas_mounts" >/dev/null; then
+            mas_failure mount-contract
           fi
           for marker in \
             ci-synapse-secret-fixture \
@@ -295,25 +313,12 @@ jobs:
               mas_failure output-secret-isolation
             fi
           done
-          if container_bounded --sensitive 65536 "$missing_output_file" 120 docker compose --ansi never --env-file .env.example \
-            -f .github/secret-proof.compose.yml run \
-            --name "$missing_container" --no-deps -T --entrypoint /usr/local/bin/mas-cli mas-secret-proof \
-            config check --config=/config.yaml --config=/secrets.json --config=/runtime-identity.yaml \
-            --config=/signing.key >/dev/null; then
-            mas_failure missing-signing-path-accepted
-          else
-            missing_path_status=$?
-            if [[ "$missing_path_status" -eq 124 ]]; then
-              mas_failure missing-signing-path-timeout
-            fi
-            echo 'MAS secret proof phase passed: missing-signing-path-failed'
-          fi
           if ! cleanup; then
             trap - EXIT
             mas_failure cleanup
           fi
           trap - EXIT
-          echo "MAS uid 991 read its own file-backed secret and could not open Synapse signing.key"
+          echo "MAS uid 991 read its own file-backed secret and had only its three declared mounts"
 
       - name: Verify pinned Synapse JSON config loader
         run: |
@@ -327,15 +332,25 @@ jobs:
           printf '%s\n' 'http:' '  public_base: https://backend.stage.telecrypt.io/auth/' '  issuer: https://backend.stage.telecrypt.io/auth/' > "$TELECRYPT_DATA_DIR/runtime/mas.identity.yaml"
           synapse_loader_output="$RUNNER_TEMP/synapse-json-loader.log"
           synapse_loader_cleanup() {
-            rm -f -- "$synapse_loader_output" "$synapse_loader_output.stderr"
+            if ! rm -f -- "$synapse_loader_output" "$synapse_loader_output.stderr"; then
+              echo 'Synapse JSON loader diagnostics cleanup failed' >&2
+              return 1
+            fi
+            return 0
+          }
+          synapse_loader_cleanup_on_exit() {
+            local status=$?
+            trap - EXIT
+            if ! synapse_loader_cleanup && [[ "$status" -eq 0 ]]; then status=1; fi
+            exit "$status"
           }
           synapse_loader_failure() {
-            echo "Synapse JSON loader proof failed: $1; sensitive diagnostics were withheld" >&2
+            echo "Synapse JSON loader proof failed: $1" >&2
             exit 1
           }
-          trap synapse_loader_cleanup EXIT
+          trap synapse_loader_cleanup_on_exit EXIT
           synapse_loader_status=0
-          if container_bounded --sensitive 65536 "$synapse_loader_output" 120 docker compose --ansi never --env-file .env.example \
+          if container_command --sensitive "$synapse_loader_output" 120 docker compose --ansi never --env-file .env.example \
             -f .github/secret-proof.compose.yml run --rm --no-deps -T \
             --entrypoint python synapse-loader-proof -c '
           import contextlib
@@ -428,7 +443,7 @@ jobs:
           print_marker(marker)
           if marker != "success":
               raise SystemExit(1)
-          ' >/dev/null; then
+          '; then
             synapse_loader_status=0
           else
             synapse_loader_status=$?
@@ -468,11 +483,21 @@ jobs:
           source .github/scripts/container-helpers.sh
           images_file="$(mktemp)"
           raw_images_file="$(mktemp)"
-          trap 'rm -f "$images_file" "$raw_images_file"' EXIT
-          container_bounded --sensitive 65536 "$raw_images_file" 120 \
-            docker compose --profile janitor --env-file .env.example config --images >/dev/null
+          cleanup() {
+            local status=0
+            if ! rm -f -- "$images_file" "$raw_images_file"; then status=1; fi
+            return "$status"
+          }
+          cleanup_on_exit() {
+            local status=$?
+            trap - EXIT
+            if ! cleanup && [[ "$status" -eq 0 ]]; then status=1; fi
+            exit "$status"
+          }
+          trap cleanup_on_exit EXIT
+          container_command --sensitive "$raw_images_file" 120 \
+            docker compose --profile janitor --env-file .env.example config --images
           rm -f -- "$raw_images_file.stderr"
-          test "$(wc -c <"$raw_images_file")" -le 65536
           sort -u "$raw_images_file" > "$images_file"
           python3 .github/scripts/validate.py image-list "$images_file"
 
@@ -481,14 +506,12 @@ jobs:
           set -euo pipefail
           source .github/scripts/container-helpers.sh
           image_list="$RUNNER_TEMP/caddy-image-list"
-          container_bounded --sensitive 65536 "$image_list" 120 \
-            docker compose --profile janitor --env-file .env.example config --images >/dev/null
+          container_command --sensitive "$image_list" 120 \
+            docker compose --profile janitor --env-file .env.example config --images
           rm -f -- "$image_list.stderr"
-          test "$(wc -c <"$image_list")" -le 65536
           caddy_image="$(awk '/docker.io\/caddy:/ { print; exit }' "$image_list")"
           test -n "$caddy_image"
-          caddy_output="$RUNNER_TEMP/caddy-validate.log"
-          container_bounded 65536 "$caddy_output" 120 docker run --rm \
+          timeout --signal=TERM --kill-after=5s 120s docker run --rm \
             --user 65532:65532 \
             --read-only \
             --security-opt no-new-privileges=true \
@@ -500,11 +523,9 @@ jobs:
             --env TRUSTED_PROXY=192.0.2.10/32 \
             --env SERVER_NAME=example.invalid \
             --volume "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
-            "$caddy_image" caddy validate --config /etc/caddy/Caddyfile >/dev/null
-          test "$(wc -c <"$caddy_output")" -le 65536
-          cat -- "$caddy_output"
+            "$caddy_image" caddy validate --config /etc/caddy/Caddyfile
           caddy_adapted="$RUNNER_TEMP/caddy-adapted.json"
-          container_bounded --sensitive 1048576 "$caddy_adapted" 120 docker run --rm \
+          container_command --sensitive "$caddy_adapted" 120 docker run --rm \
             --user 65532:65532 \
             --read-only \
             --security-opt no-new-privileges=true \
@@ -518,7 +539,6 @@ jobs:
             --volume "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
             "$caddy_image" caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile --pretty
           rm -f -- "$caddy_adapted.stderr"
-          test "$(wc -c <"$caddy_adapted")" -le 1048576
           python3 .github/scripts/validate.py adapted-caddy "$caddy_adapted"
 
   release:
@@ -559,48 +579,143 @@ jobs:
           metadata_dir="$(mktemp -d)"
           manifest_name="server-state-${GITHUB_REF_NAME#server-state-}-images.json"
           manifest_path="$RUNNER_TEMP/$manifest_name"
-          cleanup() { rm -rf "$authdir" "$metadata_dir" "$manifest_path"; }
-          trap cleanup EXIT
+          release_json_path="$RUNNER_TEMP/release.json"
+          release_error_path="$RUNNER_TEMP/release.error"
+          release_headers_path="$RUNNER_TEMP/release.headers"
+          final_release_json_path="$RUNNER_TEMP/final-release.json"
+          draft_dir="$RUNNER_TEMP/draft-release"
+          final_dir="$RUNNER_TEMP/final-release"
+          cleanup() {
+            local status=0
+            if ! rm -rf -- "$authdir" "$metadata_dir" "$manifest_path"; then status=1; fi
+            if ! rm -f -- "$release_json_path" "$release_error_path" "$release_headers_path"; then status=1; fi
+            if ! rm -f -- "$final_release_json_path"; then status=1; fi
+            if ! rm -rf -- "$draft_dir" "$final_dir"; then status=1; fi
+            return "$status"
+          }
+          cleanup_on_exit() {
+            local status=$?
+            trap - EXIT
+            if ! cleanup && [[ "$status" -eq 0 ]]; then status=1; fi
+            exit "$status"
+          }
+          trap cleanup_on_exit EXIT
 
-          bounded_output() {
-            local max_bytes="$1" output="$2" timeout_seconds="$3"
-            shift 3
-            (( max_bytes > 0 && max_bytes % 1024 == 0 )) || {
-              echo "bounded output size must be a positive multiple of 1024 bytes" >&2
-              return 1
-            }
-            local stderr="$output.stderr" status
+          capture_active_pid=""
+          capture_active_output=""
+          capture_active_stderr=""
+          capture_active_replay_output=true
+          capture_command_signal() {
+            local signal_name="$1" status=143 kill_status wait_status replay_status=0
+            case "$signal_name" in
+              HUP) status=129 ;;
+              INT) status=130 ;;
+              TERM) status=143 ;;
+              *) status=143 ;;
+            esac
             set +e
-            .github/scripts/run_bounded_combined.sh --separate "$max_bytes" "$max_bytes" \
-              "$output" "$stderr" "$timeout_seconds" "$@"
-            status=$?
-            set -e
-            if [[ "$status" -ne 0 ]]; then
-              echo "bounded command failed (status $status; stderr bytes $(wc -c < "$stderr"))" >&2
-              return "$status"
+            if [[ -n "$capture_active_pid" ]]; then
+              kill -0 "$capture_active_pid"
+              kill_status=$?
+              if [[ "$kill_status" -eq 0 ]]; then
+                kill -TERM "$capture_active_pid"
+                kill_status=$?
+                if [[ "$kill_status" -ne 0 ]]; then
+                  printf 'release capture child termination failed during %s (status %s)\n' "$signal_name" "$kill_status" >&2
+                fi
+              elif [[ "$kill_status" -ne 1 ]]; then
+                printf 'release capture child liveness check failed during %s (status %s)\n' "$signal_name" "$kill_status" >&2
+              fi
+              wait "$capture_active_pid"
+              wait_status=$?
+              capture_active_pid=""
+              if [[ "$wait_status" -eq 127 ]]; then
+                printf 'release capture child wait failed during %s\n' "$signal_name" >&2
+              fi
             fi
-            if [[ -s "$stderr" ]]; then
-              echo "bounded command emitted unexpected stderr ($(wc -c < "$stderr") bytes)" >&2
-              return 1
+            if [[ -n "$capture_active_output" && "$capture_active_replay_output" == true ]] && ! cat -- "$capture_active_output" >&2; then replay_status=1; fi
+            if [[ -n "$capture_active_stderr" ]] && ! cat -- "$capture_active_stderr" >&2; then replay_status=1; fi
+            if [[ "$replay_status" -ne 0 ]]; then
+              printf 'release capture diagnostics could not be replayed after %s\n' "$signal_name" >&2
             fi
-            test "$(wc -c < "$output")" -le "$max_bytes"
+            exit "$status"
           }
 
-          bounded_gh() {
-            local max_stdout="$1" max_stderr="$2" max_file="$3" output="$4" stderr="$5" timeout_seconds="$6" status
-            shift 6
+          capture_command() {
+            local replay_output=true
+            if [[ "${1:-}" == --binary-output ]]; then
+              replay_output=false
+              shift
+            fi
+            local output="$1" stderr="$2" timeout_seconds="$3" status replay_status=0
+            shift 3
+            local previous_hup previous_int previous_term
+            previous_hup="$(trap -p HUP || true)"
+            previous_int="$(trap -p INT || true)"
+            previous_term="$(trap -p TERM || true)"
+            capture_active_output="$output"
+            capture_active_stderr="$stderr"
+            capture_active_replay_output="$replay_output"
+            trap 'capture_command_signal HUP' HUP
+            trap 'capture_command_signal INT' INT
+            trap 'capture_command_signal TERM' TERM
             set +e
-            .github/scripts/run_bounded_combined.sh --separate "$max_stdout" "$max_stderr" \
-              "$output" "$stderr" "$timeout_seconds" "$@"
+            timeout --signal=TERM --kill-after=5s "${timeout_seconds}s" "$@" >"$output" 2>"$stderr" &
+            capture_active_pid="$!"
+            wait "$capture_active_pid"
             status=$?
             set -e
-            test "$(wc -c <"$output")" -le "$max_stdout"
-            test "$(wc -c <"$stderr")" -le "$max_stderr"
-            test "$(wc -c <"$output")" -le "$max_file"
-            if [[ "$status" -eq 0 && -s "$stderr" ]]; then
-              cat -- "$stderr" >&2
+            capture_active_pid=""
+            capture_active_output=""
+            capture_active_stderr=""
+            capture_active_replay_output=true
+            if [[ -n "$previous_hup" ]]; then eval "$previous_hup"; else trap - HUP; fi
+            if [[ -n "$previous_int" ]]; then eval "$previous_int"; else trap - INT; fi
+            if [[ -n "$previous_term" ]]; then eval "$previous_term"; else trap - TERM; fi
+            if [[ "$status" -ne 0 ]]; then
+              if [[ "$replay_output" == true ]] && ! cat -- "$output" >&2; then replay_status=1; fi
+              if ! cat -- "$stderr" >&2; then replay_status=1; fi
+              if [[ "$replay_status" -ne 0 ]]; then
+                echo 'captured command diagnostics could not be replayed' >&2
+              fi
+              return "$status"
+            fi
+            if ! cat -- "$stderr" >&2; then
+              echo 'captured command stderr could not be emitted' >&2
               return 1
             fi
+            return 0
+          }
+
+          replay_capture() {
+            local output="$1" stderr="$2" status=0
+            if ! cat -- "$output" >&2; then status=1; fi
+            if ! cat -- "$stderr" >&2; then status=1; fi
+            return "$status"
+          }
+
+          capture_jq() {
+            local output="$1" stderr="$2" status
+            shift 2
+            if jq -e "$@" "$output" >/dev/null; then
+              return 0
+            else
+              status="$?"
+            fi
+            replay_capture "$output" "$stderr" || echo 'captured response diagnostics could not be replayed' >&2
+            return "$status"
+          }
+
+          capture_extract() {
+            local variable="$1" output="$2" stderr="$3" value status
+            shift 3
+            if value="$(jq -er "$@" "$output")"; then
+              printf -v "$variable" '%s' "$value"
+              return 0
+            else
+              status="$?"
+            fi
+            replay_capture "$output" "$stderr" || echo 'captured response diagnostics could not be replayed' >&2
             return "$status"
           }
 
@@ -615,6 +730,16 @@ jobs:
             awk 'BEGIN { body = 0 } { line = $0; sub(/\r$/, "", line); if (!body) { if (line == "") body = 1; next } print }' "$1"
           }
 
+          replay_discovery_pages() {
+            local status=0 page_headers
+            for page_headers in "$metadata_dir"/release-page-*.headers; do
+              [[ -e "$page_headers" ]] || continue
+              if ! cat -- "$page_headers" >&2; then status=1; fi
+              if ! cat -- "$page_headers.error" >&2; then status=1; fi
+            done
+            return "$status"
+          }
+
           [[ "$GITHUB_REF_NAME" =~ ^server-state-[0-9a-f]{7,10}$ ]]
           release_commit="$GITHUB_SHA"
           release_suffix="${GITHUB_REF_NAME#server-state-}"
@@ -627,7 +752,7 @@ jobs:
 
           verify_source_identity() {
             local current_annotated_tag_sha current_tag_commit remote_annotated_tag_sha remote_tag_path
-            bounded_output 65536 "$metadata_dir/source-fetch.log" 30 bash .github/scripts/git_transport.sh fetch "$GITHUB_REPOSITORY" \
+            timeout --signal=TERM --kill-after=5s 30s bash .github/scripts/git_transport.sh fetch "$GITHUB_REPOSITORY" \
               refs/heads/main:refs/remotes/origin/main \
               "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
             test "$(git_value cat-file-type "refs/tags/$GITHUB_REF_NAME")" = tag
@@ -636,11 +761,9 @@ jobs:
             current_tag_commit="$(git_value rev-parse "refs/tags/$GITHUB_REF_NAME^{commit}")"
             test "$current_tag_commit" = "$release_commit"
             test "$(git_value rev-parse HEAD)" = "$release_commit"
-            bounded_output 65536 "$metadata_dir/main-check" 30 bash .github/scripts/git_transport.sh \
-              local-read rev-parse refs/remotes/origin/main
             test "$(git_value rev-parse refs/remotes/origin/main)" = "$release_commit"
             remote_tag_path="$metadata_dir/remote-tag.log"
-            bounded_output 65536 "$remote_tag_path" 30 bash .github/scripts/git_transport.sh ls-remote "$GITHUB_REPOSITORY" \
+            capture_command "$remote_tag_path" "$remote_tag_path.stderr" 30 bash .github/scripts/git_transport.sh ls-remote "$GITHUB_REPOSITORY" \
               "refs/tags/$GITHUB_REF_NAME"
             test "$(wc -l < "$remote_tag_path")" = 1
             remote_annotated_tag_sha="$(awk 'NF == 2 { print $1 }' "$remote_tag_path")"
@@ -656,11 +779,11 @@ jobs:
           login_stdout="$metadata_dir/skopeo-login.stdout"
           registry_token="$GH_TOKEN"
           unset GH_TOKEN
-          if ! printf '%s' "$registry_token" | container_bounded --sensitive --inherit-stdin 65536 "$login_stdout" 30 skopeo login --authfile "$authfile" \
+          if ! printf '%s' "$registry_token" | container_command --sensitive --inherit-stdin "$login_stdout" 30 skopeo login --authfile "$authfile" \
             --username "$GITHUB_ACTOR" --password-stdin ghcr.io; then
             unset registry_token
             rm -f -- "$login_stdout" "$login_stdout.stderr"
-            echo "registry authentication failed; sensitive diagnostics were withheld" >&2
+            echo 'registry authentication failed' >&2
             exit 1
           fi
           rm -f -- "$login_stdout" "$login_stdout.stderr"
@@ -672,20 +795,20 @@ jobs:
             # Resolve each deployment tag once. Keep this top-level tag/index digest as the exact
             # deployment coordinate; inspect the linux/amd64 child selected through that immutable
             # digest for metadata, labels, and config while Compose keeps the human-readable tag.
-            container_bounded 1024 "$digest_path" 60 skopeo inspect --authfile "$authfile" --no-tags --format '{{.Digest}}' \
-              "docker://$image" >/dev/null
+            container_command "$digest_path" 60 skopeo inspect --authfile "$authfile" --no-tags --format '{{.Digest}}' \
+              "docker://$image"
             resolved_digest="$(<"$digest_path")"
             [[ "$resolved_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
             resolved_image="docker://$repository@$resolved_digest"
-            container_bounded 1048576 "$metadata_dir/$name.metadata" 60 skopeo inspect --authfile "$authfile" --no-tags \
+            container_command "$metadata_dir/$name.metadata" 60 skopeo inspect --authfile "$authfile" --no-tags \
               --override-os linux --override-arch amd64 --format '{{json .}}' \
-              "$resolved_image" >/dev/null
-            container_bounded 1048576 "$metadata_dir/$name.labels" 60 skopeo inspect --authfile "$authfile" \
+              "$resolved_image"
+            container_command "$metadata_dir/$name.labels" 60 skopeo inspect --authfile "$authfile" \
               --override-os linux --override-arch amd64 --format '{{json .Labels}}' \
-              "$resolved_image" >/dev/null
-            container_bounded 1048576 "$metadata_dir/$name.config" 60 skopeo inspect --authfile "$authfile" --config \
+              "$resolved_image"
+            container_command "$metadata_dir/$name.config" 60 skopeo inspect --authfile "$authfile" --config \
               --override-os linux --override-arch amd64 \
-              "$resolved_image" >/dev/null
+              "$resolved_image"
           done
           python3 .github/scripts/validate.py image-release-manifest \
             "$metadata_dir" "$GITHUB_REF_NAME" "$manifest_path"
@@ -697,8 +820,8 @@ jobs:
               image="${!key}"
               expected_digest="$(jq -er --arg key "$key" '.images[$key].digest' "$manifest_path")"
               digest_path="$metadata_dir/$key.digest"
-              container_bounded 1024 "$digest_path" 60 skopeo inspect \
-                --authfile "$authfile" --no-tags --format '{{.Digest}}' "docker://$image" >/dev/null
+              container_command "$digest_path" 60 skopeo inspect \
+                --authfile "$authfile" --no-tags --format '{{.Digest}}' "docker://$image"
               current_digest="$(<"$digest_path")"
               test "$current_digest" = "$expected_digest"
             done
@@ -709,8 +832,7 @@ jobs:
           release_body="Exact server_state image digest manifest for commit $release_commit."
           check_server_release() {
             local release_path="$1" release_id="$2"
-            test "$(wc -c < "$release_path")" -le 1048576
-            jq -e --arg id "$release_id" --arg tag "$GITHUB_REF_NAME" \
+            capture_jq "$release_path" "$release_error_path" --arg id "$release_id" --arg tag "$GITHUB_REF_NAME" \
               --arg name "$manifest_name" --arg digest "$manifest_digest" \
               --arg body "$release_body" \
               --argjson size "$manifest_size" '
@@ -722,12 +844,11 @@ jobs:
                 (.assets[0].id | type) == "number" and (.assets[0].id == (.assets[0].id | floor)) and .assets[0].id > 0 and
                 (.assets[0].size | type) == "number" and (.assets[0].size == (.assets[0].size | floor)) and .assets[0].size == $size and .assets[0].size > 0 and .assets[0].size <= 1048576 and
                 (.assets[0].digest | type) == "string" and .assets[0].digest == $digest
-              ' "$release_path" >/dev/null
+              '
           }
           check_server_draft() {
             local release_path="$1" release_id="$2"
-            test "$(wc -c < "$release_path")" -le 1048576
-            jq -e --arg id "$release_id" --arg tag "$GITHUB_REF_NAME" --arg name "$manifest_name" \
+            capture_jq "$release_path" "$release_error_path" --arg id "$release_id" --arg tag "$GITHUB_REF_NAME" --arg name "$manifest_name" \
               --arg body "$release_body" '
                 (.id | type) == "number" and (.id | tostring) == $id and (.id == (.id | floor)) and .id > 0 and
                 (.body | type) == "string" and .body == $body and
@@ -739,95 +860,143 @@ jobs:
                    .assets[0].state == "uploaded" and
                    (.assets[0].id | type) == "number" and (.assets[0].id == (.assets[0].id | floor)) and .assets[0].id > 0 and
                    (.assets[0].size | type) == "number" and (.assets[0].size == (.assets[0].size | floor)) and .assets[0].size > 0 and .assets[0].size <= 1048576))
-              ' "$release_path" >/dev/null
+              '
           }
-          release_json_path="$RUNNER_TEMP/release.json"
-          release_error_path="$RUNNER_TEMP/release.error"
-          release_headers_path="$RUNNER_TEMP/release.headers"
           get_release_by_id() {
             local release_id="$1" command_status code
             [[ "$release_id" =~ ^[1-9][0-9]*$ ]]
             set +e
-            bounded_gh 1048576 65536 1048576 "$release_headers_path" "$release_error_path" 30 \
+            capture_command "$release_headers_path" "$release_error_path" 30 \
               gh api --include --hostname github.com \
               --header 'Accept: application/vnd.github+json' \
               --header 'X-GitHub-Api-Version: 2026-03-10' \
               "repos/$GITHUB_REPOSITORY/releases/$release_id"
             command_status=$?
             set -e
-            code="$(http_status "$release_headers_path")"
+            if code="$(http_status "$release_headers_path")"; then
+              :
+            else
+              command_status="$?"
+              replay_capture "$release_headers_path" "$release_error_path" || echo 'release response diagnostics could not be replayed' >&2
+              return "$command_status"
+            fi
             case "$code" in
               200)
-                test "$command_status" -eq 0
-                test ! -s "$release_error_path"
-                http_body "$release_headers_path" >"$release_json_path"
-                test "$(wc -c <"$release_json_path")" -le 1048576
+                if [[ "$command_status" -ne 0 ]]; then
+                  return "$command_status"
+                fi
+                if ! http_body "$release_headers_path" >"$release_json_path"; then
+                  replay_capture "$release_headers_path" "$release_error_path" || echo 'release response diagnostics could not be replayed' >&2
+                  return 1
+                fi
                 return 0
                 ;;
               404)
-              test "$command_status" -ne 0
-              return 4
+                if [[ "$command_status" -eq 0 ]]; then
+                  replay_capture "$release_headers_path" "$release_error_path" || echo 'release response diagnostics could not be replayed' >&2
+                  return 1
+                fi
+                return 4
               ;;
               *)
-                cat -- "$release_error_path" >&2
+                replay_capture "$release_headers_path" "$release_error_path" || echo 'release response diagnostics could not be replayed' >&2
                 return 1
                 ;;
             esac
           }
           discover_release() {
-            local page=1 page_size list_status list_code page_headers page_json match_count
-            local max_release_pages=100
+            local page=1 page_size list_status list_code page_headers page_json match_count extraction_status
             local matches_path="$metadata_dir/release-matches.jsonl"
             : >"$matches_path"
+            : >"$matches_path.error"
             while :; do
               page_headers="$metadata_dir/release-page-$page.headers"
               page_json="$metadata_dir/release-page-$page.json"
               set +e
-              bounded_gh 1048576 65536 1048576 "$page_headers" "$page_headers.error" 30 \
+              capture_command "$page_headers" "$page_headers.error" 30 \
                 gh api --include --hostname github.com \
                 --header 'Accept: application/vnd.github+json' \
                 --header 'X-GitHub-Api-Version: 2026-03-10' \
-                --jq '[.[] | {id,tag_name,draft}]' \
                 "repos/$GITHUB_REPOSITORY/releases?per_page=100&page=$page"
               list_status=$?
               set -e
-              test "$list_status" -eq 0
-              list_code="$(http_status "$page_headers")"
-              test "$list_code" = 200
-              http_body "$page_headers" >"$page_json"
-              test "$(wc -c <"$page_json")" -le 1048576
-              jq -e 'type == "array" and length <= 100' "$page_json" >/dev/null
-              jq -c --arg tag "$GITHUB_REF_NAME" '.[] | select(.tag_name == $tag) | {id,tag_name,draft}' "$page_json" >>"$matches_path"
-              page_size="$(jq -er 'length' "$page_json")"
+              if [[ "$list_status" -ne 0 ]]; then
+                return "$list_status"
+              fi
+              if list_code="$(http_status "$page_headers")"; then
+                :
+              else
+                list_status="$?"
+                replay_capture "$page_headers" "$page_headers.error" || echo 'release list response diagnostics could not be replayed' >&2
+                return "$list_status"
+              fi
+              if [[ "$list_code" != 200 ]]; then
+                replay_capture "$page_headers" "$page_headers.error" || echo 'release list response diagnostics could not be replayed' >&2
+                return 1
+              fi
+              if ! http_body "$page_headers" >"$page_json"; then
+                replay_capture "$page_headers" "$page_headers.error" || echo 'release list response diagnostics could not be replayed' >&2
+                return 1
+              fi
+              if capture_jq "$page_json" "$page_headers.error" 'type == "array" and length <= 100'; then
+                :
+              else
+                return "$?"
+              fi
+              if ! jq -c --arg tag "$GITHUB_REF_NAME" '.[] | select(.tag_name == $tag) | {id,tag_name,draft}' "$page_json" >>"$matches_path"; then
+                replay_capture "$page_json" "$page_headers.error" || echo 'release list response diagnostics could not be replayed' >&2
+                return 1
+              fi
+              capture_extract page_size "$page_json" "$page_headers.error" 'length'
               if [[ "$page_size" -lt 100 ]]; then
                 break
               fi
-              if [[ "$page" -ge "$max_release_pages" ]]; then
-                echo "Release list completeness cannot be proven within the bounded page limit" >&2
-                exit 1
-              fi
               page=$((page + 1))
             done
-            match_count="$(jq -s -er 'length' "$matches_path")"
-            [[ "$match_count" -le 1 ]]
+            if capture_extract match_count "$matches_path" "$matches_path.error" 'length'; then
+              :
+            else
+              extraction_status="$?"
+              replay_discovery_pages || echo 'release list diagnostics could not be replayed' >&2
+              return "$extraction_status"
+            fi
+            if [[ "$match_count" -gt 1 ]]; then
+              replay_discovery_pages || echo 'release list diagnostics could not be replayed' >&2
+              return 1
+            fi
             if [[ "$match_count" -eq 0 ]]; then
               release_discovery_state="absent"
               release_id=""
               return 0
             fi
-            release_id="$(jq -s -er '.[0].id | select(type == "number" and . == floor and . > 0) | tostring' "$matches_path")"
-            release_discovery_state="$(jq -s -er 'if .[0].draft == true then "draft" elif .[0].draft == false then "published" else empty end' "$matches_path")"
+            if capture_extract release_id "$matches_path" "$matches_path.error" -s '.[0].id | select(type == "number" and . == floor and . > 0) | tostring'; then
+              :
+            else
+              extraction_status="$?"
+              replay_discovery_pages || echo 'release list diagnostics could not be replayed' >&2
+              return "$extraction_status"
+            fi
+            if capture_extract release_discovery_state "$matches_path" "$matches_path.error" -s 'if .[0].draft == true then "draft" elif .[0].draft == false then "published" else empty end'; then
+              :
+            else
+              extraction_status="$?"
+              replay_discovery_pages || echo 'release list diagnostics could not be replayed' >&2
+              return "$extraction_status"
+            fi
           }
           download_and_compare_manifest() {
             local directory="$1" asset_id="$2"
             mkdir -p "$directory"
-            bounded_gh 1048576 65536 1048576 "$directory/$manifest_name" "$directory/$manifest_name.error" 120 gh api \
+            capture_command "$directory/$manifest_name" "$directory/$manifest_name.error" 120 gh api \
               --hostname github.com \
               --header 'Accept: application/octet-stream' \
               --header 'X-GitHub-Api-Version: 2026-03-10' \
               "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
-            test "$(wc -c < "$directory/$manifest_name")" -le 1048576
-            cmp -- "$manifest_path" "$directory/$manifest_name"
+            if ! cmp -- "$manifest_path" "$directory/$manifest_name"; then
+              echo 'downloaded server-state manifest did not match the generated manifest' >&2
+              replay_capture "$directory/$manifest_name" "$directory/$manifest_name.error" || echo 'manifest diagnostics could not be replayed' >&2
+              return 1
+            fi
           }
 
           # Re-fetch the source identity after all registry work and immediately before the
@@ -848,7 +1017,7 @@ jobs:
               verify_source_identity
               create_path="$metadata_dir/release-create.json"
               set +e
-              bounded_gh 65536 65536 65536 "$create_path" "$metadata_dir/release-create.error" 60 \
+              capture_command "$create_path" "$metadata_dir/release-create.error" 60 \
                 gh api --hostname github.com --method POST \
                 --header 'Accept: application/vnd.github+json' \
                 --header 'X-GitHub-Api-Version: 2026-03-10' \
@@ -861,13 +1030,16 @@ jobs:
               create_status=$?
               set -e
               if [[ "$create_status" -eq 0 ]]; then
-                release_id="$(jq -er '.id | select(type == "number" and . == floor and . > 0) | tostring' "$create_path")"
+                capture_extract release_id "$create_path" "$metadata_dir/release-create.error" \
+                  '.id | select(type == "number" and . == floor and . > 0) | tostring'
               else
                 # A lost create response is recoverable only through a complete, unique draft
                 # discovery. Any absent or ambiguous result fails closed.
-                test ! -s "$metadata_dir/release-create.error"
                 discover_release
-                test "$release_discovery_state" = draft
+                if [[ "$release_discovery_state" != draft ]]; then
+                  replay_capture "$create_path" "$metadata_dir/release-create.error" || echo 'release create response diagnostics could not be replayed' >&2
+                  exit 1
+                fi
               fi
               get_release_by_id "$release_id"
               check_server_draft "$release_json_path" "$release_id"
@@ -877,54 +1049,45 @@ jobs:
               exit 1
               ;;
           esac
-          asset_count="$(jq -er '.assets|length' "$release_json_path")"
+          capture_extract asset_count "$release_json_path" "$release_error_path" '.assets|length'
           if [[ "$asset_count" -eq 0 ]]; then
             test "$manifest_size" -le 1048576
-            upload_url="$(jq -er '.upload_url | select(type == "string" and test("^https://uploads\\.github\\.com/repos/[^/]+/[^/]+/releases/[0-9]+/assets\\{\\?name,label\\}$"))' "$release_json_path")"
+            capture_extract upload_url "$release_json_path" "$release_error_path" '.upload_url | select(type == "string" and test("^https://uploads\\.github\\.com/repos/[^/]+/[^/]+/releases/[0-9]+/assets\\{\\?name,label\\}$"))'
             upload_url="${upload_url%\{*}"
-            test "$upload_url" = "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets"
-            set +e
-            bounded_gh 65536 65536 65536 "$metadata_dir/release-upload.log" "$metadata_dir/release-upload.error" 120 \
+            if [[ "$upload_url" != "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets" ]]; then
+              echo 'GitHub Release upload URL did not match the exact release identity' >&2
+              replay_capture "$release_json_path" "$release_error_path" || echo 'release response diagnostics could not be replayed' >&2
+              exit 1
+            fi
+            timeout --signal=TERM --kill-after=5s 120s \
               gh api --hostname github.com --method POST \
               --header 'Accept: application/vnd.github+json' \
               --header 'Content-Type: application/json' \
               --header 'X-GitHub-Api-Version: 2026-03-10' \
               --input "$manifest_path" "$upload_url?name=$manifest_name"
-            upload_status=$?
-            set -e
-            test ! -s "$metadata_dir/release-upload.error"
             get_release_by_id "$release_id"
           fi
           get_release_by_id "$release_id"
           check_server_draft "$release_json_path" "$release_id"
-          release_asset_id="$(jq -er --arg name "$manifest_name" \
-            '.assets | select(length == 1) | .[0] | select(.name == $name and (.id | type == "number" and . == floor and . > 0)) | .id' "$release_json_path")"
+          capture_extract release_asset_id "$release_json_path" "$release_error_path" --arg name "$manifest_name" \
+            '.assets | select(length == 1) | .[0] | select(.name == $name and (.id | type == "number" and . == floor and . > 0)) | .id'
           draft_dir="$RUNNER_TEMP/draft-release"
           download_and_compare_manifest "$draft_dir" "$release_asset_id"
-          if [[ "${upload_status:-0}" -ne 0 ]]; then
-            test ! -s "$metadata_dir/release-upload.error"
-          fi
           # Reconfirm source and the exact numeric draft immediately before publication.
           verify_source_identity
           get_release_by_id "$release_id"
           check_server_draft "$release_json_path" "$release_id"
-          set +e
-          bounded_gh 65536 65536 65536 "$metadata_dir/release-edit.log" "$metadata_dir/release-edit.error" 60 \
+          timeout --signal=TERM --kill-after=5s 60s \
             gh api --hostname github.com --method PATCH \
             --header 'Accept: application/vnd.github+json' \
-            --header 'X-GitHub-Api-Version: 2026-03-10' \
-            --field draft=false "repos/$GITHUB_REPOSITORY/releases/$release_id"
-          edit_status=$?
-          set -e
-          test ! -s "$metadata_dir/release-edit.error"
+              --header 'X-GitHub-Api-Version: 2026-03-10' \
+              --field draft=false "repos/$GITHUB_REPOSITORY/releases/$release_id"
           final_release_json_path="$RUNNER_TEMP/final-release.json"
           get_release_by_id "$release_id"
           cp -- "$release_json_path" "$final_release_json_path"
           check_server_release "$final_release_json_path" "$release_id"
-          if [[ "$edit_status" -ne 0 ]]; then
-            test ! -s "$metadata_dir/release-edit.error"
-          fi
-          release_asset_id="$(jq -er '.assets[0].id | select(type == "number" and . == floor and . > 0)' "$final_release_json_path")"
+          capture_extract release_asset_id "$final_release_json_path" "$release_error_path" \
+            '.assets[0].id | select(type == "number" and . == floor and . > 0)'
           final_dir="$RUNNER_TEMP/final-release"
           download_and_compare_manifest "$final_dir" "$release_asset_id"
           unset GH_TOKEN

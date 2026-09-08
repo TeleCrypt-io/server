@@ -4,35 +4,157 @@ set -euo pipefail
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${METADATA_DIR:?METADATA_DIR is required}"
 
-MAX_RELEASE_JSON_BYTES=1048576
 MAX_RELEASE_ASSET_BYTES=1048576
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+active_pid=""
+active_output=""
+active_stderr=""
+active_replay_output=true
+captured_stderr_files=()
 
-bounded_api() {
-  local max_bytes="$1" output="$2" phase="$3" repository="$4" tag="$5"
-  shift 5
-  (( max_bytes > 0 )) || return 1
-  local stderr="$output.stderr" status
+signal_exit() {
+  local signal_name="$1" status=143 kill_status wait_status replay_status=0
+  case "$signal_name" in
+    HUP) status=129 ;;
+    INT) status=130 ;;
+    TERM) status=143 ;;
+    *) status=143 ;;
+  esac
   set +e
-  "$SCRIPT_DIR/run_bounded_combined.sh" --separate "$max_bytes" "$max_bytes" \
-    "$output" "$stderr" 60 gh api "$@"
+  if [[ -n "$active_pid" ]]; then
+    kill -0 "$active_pid"
+    kill_status=$?
+    if [[ "$kill_status" -ne 0 ]]; then
+      if [[ "$kill_status" -ne 1 ]]; then
+        printf 'GitHub API child liveness check failed during %s (status %s)\n' "$signal_name" "$kill_status" >&2
+      fi
+    else
+      kill -TERM "$active_pid"
+      kill_status=$?
+      if [[ "$kill_status" -ne 0 ]]; then
+        printf 'GitHub API child termination failed during %s (status %s)\n' "$signal_name" "$kill_status" >&2
+      fi
+    fi
+    wait "$active_pid"
+    wait_status=$?
+    active_pid=""
+    if [[ "$wait_status" -eq 127 ]]; then
+      printf 'GitHub API child wait failed during %s\n' "$signal_name" >&2
+    fi
+    if [[ "$wait_status" -eq 0 ]]; then
+      printf 'GitHub API child exited successfully while handling %s\n' "$signal_name" >&2
+    fi
+  fi
+  if [[ -n "$active_output" && "$active_replay_output" == true ]] && ! cat -- "$active_output" >&2; then
+    replay_status=1
+  fi
+  if [[ -n "$active_stderr" ]] && ! cat -- "$active_stderr" >&2; then
+    replay_status=1
+  fi
+  if [[ "$replay_status" -ne 0 ]]; then
+    printf 'GitHub API diagnostics could not be replayed after %s\n' "$signal_name" >&2
+  fi
+  exit "$status"
+}
+
+trap 'signal_exit HUP' HUP
+trap 'signal_exit INT' INT
+trap 'signal_exit TERM' TERM
+
+capture_api() {
+  local replay_output=true
+  if [[ "${1:-}" == --binary-output ]]; then
+    replay_output=false
+    shift
+  fi
+  local output="$1" phase="$2" repository="$3" tag="$4"
+  shift 4
+  local stderr="$output.stderr" status
+  captured_stderr_files+=("$stderr")
+  active_output="$output"
+  active_stderr="$stderr"
+  active_replay_output="$replay_output"
+  set +e
+  timeout --signal=TERM --kill-after=5s 60s gh api "$@" >"$output" 2>"$stderr" &
+  active_pid="$!"
+  wait "$active_pid"
   status=$?
   set -e
+  active_pid=""
+  active_output=""
+  active_stderr=""
+  active_replay_output=true
   if [[ "$status" -ne 0 ]]; then
-    echo "GitHub API request failed (phase=$phase repository=$repository tag=$tag; status $status; stderr bytes $(wc -c < "$stderr"))" >&2
+    echo "GitHub API request failed (phase=$phase repository=$repository tag=$tag; status $status)" >&2
+    if [[ "$replay_output" == true ]]; then
+      cat -- "$output" >&2
+    fi
+    cat -- "$stderr" >&2
+  elif [[ -s "$stderr" ]]; then
+    cat -- "$stderr" >&2
+  fi
+  if [[ "$status" -ne 0 ]]; then
     return "$status"
   fi
-  if [[ -s "$stderr" ]]; then
-    echo "GitHub API request emitted unexpected stderr ($(wc -c < "$stderr") bytes)" >&2
-    return 1
+}
+
+replay_api_response() {
+  local output="$1" stderr="$2" status=0
+  if ! cat -- "$output" >&2; then
+    status=1
   fi
-  rm -f "$stderr"
-  test "$(wc -c < "$output")" -le "$max_bytes"
+  if ! cat -- "$stderr" >&2; then
+    status=1
+  fi
+  return "$status"
+}
+
+validate_api_json() {
+  local output="$1" phase="$2" repository="$3" tag="$4" status
+  shift 4
+  if jq -e "$@" "$output" >/dev/null; then
+    return 0
+  else
+    status="$?"
+  fi
+  echo "GitHub API response failed semantic validation (phase=$phase repository=$repository tag=$tag)" >&2
+  replay_api_response "$output" "$output.stderr" ||
+    echo "GitHub API response diagnostics could not be replayed (phase=$phase repository=$repository tag=$tag)" >&2
+  return "$status"
+}
+
+extract_api_json() {
+  local variable="$1" output="$2" phase="$3" repository="$4" tag="$5" value status
+  shift 5
+  if value="$(jq -er "$@" "$output")"; then
+    printf -v "$variable" '%s' "$value"
+    return 0
+  else
+    status="$?"
+  fi
+  echo "GitHub API response failed semantic extraction (phase=$phase repository=$repository tag=$tag)" >&2
+  replay_api_response "$output" "$output.stderr" ||
+    echo "GitHub API response diagnostics could not be replayed (phase=$phase repository=$repository tag=$tag)" >&2
+  return "$status"
 }
 
 # shellcheck disable=SC1091
 source versions.env
 mkdir -p "$METADATA_DIR"
+cleanup_captured_stderr() {
+  local status=$? cleanup_status=0 stderr_file
+  trap - EXIT
+  for stderr_file in "${captured_stderr_files[@]}"; do
+    if ! rm -f -- "$stderr_file"; then
+      cleanup_status=1
+      echo "GitHub API stderr cleanup failed: $stderr_file" >&2
+    fi
+  done
+  if [[ "$status" -eq 0 && "$cleanup_status" -ne 0 ]]; then
+    status=1
+  fi
+  exit "$status"
+}
+trap cleanup_captured_stderr EXIT
 
 fetch_release_asset() {
   local key="$1" image="$2" repository="$3" asset_name="$4"
@@ -43,46 +165,66 @@ fetch_release_asset() {
   local annotated_tag_path="$METADATA_DIR/$key.annotated-tag.json"
   local api_root="https://api.github.com/repos/$repository"
   local annotated_tag_sha
-  bounded_api "$MAX_RELEASE_JSON_BYTES" "$tag_ref_path" tag-ref "$repository" "$tag" \
+  capture_api "$tag_ref_path" tag-ref "$repository" "$tag" \
     --hostname github.com \
     --header 'Accept: application/vnd.github+json' \
     --header 'X-GitHub-Api-Version: 2026-03-10' \
     "repos/$repository/git/ref/tags/$tag"
-  annotated_tag_sha="$(jq -er --arg ref "refs/tags/$tag" --arg url "$api_root/git/refs/tags/$tag" \
+  extract_api_json annotated_tag_sha "$tag_ref_path" tag-ref "$repository" "$tag" \
+    --arg ref "refs/tags/$tag" --arg url "$api_root/git/refs/tags/$tag" \
     '. | select(type == "object" and .ref == $ref and .url == $url) |
      .object | select(type == "object" and .type == "tag" and
-       (.sha | type == "string" and test("^[0-9a-f]{40}$"))) | .sha' "$tag_ref_path")"
-  bounded_api "$MAX_RELEASE_JSON_BYTES" "$annotated_tag_path" annotated-tag "$repository" "$tag" \
+       (.sha | type == "string" and test("^[0-9a-f]{40}$"))) | .sha'
+  capture_api "$annotated_tag_path" annotated-tag "$repository" "$tag" \
     --hostname github.com \
     --header 'Accept: application/vnd.github+json' \
     --header 'X-GitHub-Api-Version: 2026-03-10' \
     "repos/$repository/git/tags/$annotated_tag_sha"
-  jq -e --arg tag "$tag" --arg sha "$annotated_tag_sha" --arg commit_url "$api_root/git/commits/" \
+  validate_api_json "$annotated_tag_path" annotated-tag "$repository" "$tag" \
+    --arg tag "$tag" --arg sha "$annotated_tag_sha" --arg commit_url "$api_root/git/commits/" \
     --arg object_url "$api_root/git/tags/$annotated_tag_sha" \
     '. | select(type == "object" and .sha == $sha and .tag == $tag and .url == $object_url) |
      .object as $target | $target | select(type == "object" and .type == "commit" and
        (.sha | type == "string" and test("^[0-9a-f]{40}$")) and
-       ($target.url | type == "string" and . == ($commit_url + $target.sha)))' "$annotated_tag_path" >/dev/null
-  bounded_api "$MAX_RELEASE_JSON_BYTES" "$release_path" release "$repository" "$tag" \
+       ($target.url | type == "string" and . == ($commit_url + $target.sha)))'
+  capture_api "$release_path" release "$repository" "$tag" \
     --hostname github.com \
     --header 'Accept: application/vnd.github+json' \
     --header 'X-GitHub-Api-Version: 2026-03-10' \
     "repos/$repository/releases/tags/$tag"
-  test "$(wc -c < "$release_path")" -le "$MAX_RELEASE_JSON_BYTES"
   local asset_id
-  asset_id="$(jq -er --arg asset "$asset_name" '.assets | map(select(.name == $asset)) |
+  extract_api_json asset_id "$release_path" release "$repository" "$tag" \
+    --arg asset "$asset_name" '.assets | map(select(.name == $asset)) |
     if length == 1 then .[0].id else error end |
-    select(type == "number" and . == floor and . > 0)' "$release_path")"
-  bounded_api "$MAX_RELEASE_ASSET_BYTES" "$asset_path" asset "$repository" "$tag" \
+    select(type == "number" and . == floor and . > 0)'
+  capture_api --binary-output "$asset_path" asset "$repository" "$tag" \
     --hostname github.com \
     --header 'Accept: application/octet-stream' \
     --header 'X-GitHub-Api-Version: 2026-03-10' \
     "repos/$repository/releases/assets/$asset_id"
-  test -s "$asset_path"
-  test "$(wc -c < "$asset_path")" -le "$MAX_RELEASE_ASSET_BYTES"
-  test "$(wc -c < "$asset_path")" -eq "$(jq -er --arg asset "$asset_name" '.assets | map(select(.name == $asset)) |
+  if [[ ! -s "$asset_path" ]]; then
+    echo "GitHub release asset was empty (repository=$repository tag=$tag asset=$asset_name)" >&2
+    replay_api_response "$release_path" "$release_path.stderr" ||
+      echo "GitHub release response diagnostics could not be replayed (repository=$repository tag=$tag)" >&2
+    return 1
+  fi
+  if [[ "$(wc -c < "$asset_path")" -gt "$MAX_RELEASE_ASSET_BYTES" ]]; then
+    echo "GitHub release asset exceeded the supported size (repository=$repository tag=$tag asset=$asset_name)" >&2
+    replay_api_response "$release_path" "$release_path.stderr" ||
+      echo "GitHub release response diagnostics could not be replayed (repository=$repository tag=$tag)" >&2
+    return 1
+  fi
+  local expected_asset_size
+  extract_api_json expected_asset_size "$release_path" release "$repository" "$tag" \
+    --arg asset "$asset_name" '.assets | map(select(.name == $asset)) |
     if length == 1 then .[0].size else error end |
-    select(type == "number" and . == floor and . > 0)' "$release_path")"
+    select(type == "number" and . == floor and . > 0)'
+  if [[ "$(wc -c < "$asset_path")" -ne "$expected_asset_size" ]]; then
+    echo "GitHub release asset size mismatch (repository=$repository tag=$tag asset=$asset_name)" >&2
+    replay_api_response "$release_path" "$release_path.stderr" ||
+      echo "GitHub release response diagnostics could not be replayed (repository=$repository tag=$tag)" >&2
+    return 1
+  fi
 }
 
 fetch_release_asset SYNAPSE_IMAGE "$SYNAPSE_IMAGE" TeleCrypt-io/telecrypt-synapse \

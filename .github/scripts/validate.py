@@ -107,7 +107,6 @@ EXPECTED_TMPFS = {
     "caddy": ["/config/caddy:uid=65532,gid=65532,mode=0700", "/data/caddy:uid=65532,gid=65532,mode=0700"],
     "synapse": ["/tmp:uid=991,gid=991,mode=1777,size=16m"],
 }
-EXPECTED_LOGGING = {"driver": "json-file", "options": {"max-size": "10m", "max-file": "3"}}
 EXPECTED_HEALTHCHECKS = {
     "synapse": {"test": ["CMD", "curl", "-fSs", "http://localhost:8008/health"], "interval": "15s", "timeout": "5s", "retries": 3, "start_period": "15s"},
     "mas": {"test": ["CMD", "/usr/local/bin/mas-cli", "config", "check", "--config=/config.yaml", "--config=/secrets.json", "--config=/runtime-identity.yaml"], "interval": "15s", "timeout": "5s", "retries": 5, "start_period": "30s"},
@@ -607,7 +606,7 @@ def validate_caddy(caddy: str, caddy_body: str) -> None:
         check(len(re.findall(rf"(?im)^\s*{re.escape(field)}\s+delete\s*$", caddy)) == 1, field)
     check("response>headers>Set-Cookie" not in caddy and "trusted_proxies_strict" in caddy, "header policy")
     check(caddy.count("header_up -X-Telecrypt-Client-IP") == 1 and not re.search(r"(?im)^\s*header_up\s+X-Telecrypt-Client-IP(?:\s|$)", caddy), "client identity")
-    check("@dodo_webhook_path path /webhooks/dodo" in caddy and "log_skip @dodo_webhook_path" in caddy, "Dodo logging")
+    check("log_skip" not in caddy, "Dodo logging")
     dodo = caddy[caddy.index("@dodo_webhook {"):caddy.index("\n\t}", caddy.index("@dodo_webhook {"))]
     handle = caddy[caddy.index("handle @dodo_webhook {"):caddy.index("\n\t}", caddy.index("handle @dodo_webhook {"))]
     check("method POST" in dodo and "path /webhooks/dodo" in dodo and "reverse_proxy cashier:9011" in handle and 'Cache-Control "no-store"' in handle, "Dodo route")
@@ -968,7 +967,7 @@ def validate_rendered(path: Path) -> None:
             check(actual_env.get(key) == value, (service, key))
         check(not set(actual_env) & set(SECRET_ENV.values()), (service, "secret environment"))
         check("env_file" not in settings, (service, "live env files"))
-        check(settings.get("logging") == EXPECTED_LOGGING, (service, "log rotation"))
+        check("logging" not in settings, (service, "diagnostic output retention"))
         check(settings.get("tmpfs", []) == EXPECTED_TMPFS.get(service, []), (service, "tmpfs"))
         expected_healthcheck = EXPECTED_HEALTHCHECKS.get(service)
         if expected_healthcheck is None:

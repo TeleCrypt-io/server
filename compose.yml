@@ -42,9 +42,6 @@ services:
     tmpfs:
       - /config/caddy:uid=65532,gid=65532,mode=0700
       - /data/caddy:uid=65532,gid=65532,mode=0700
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
     ports:
       # Set INGRESS_BIND_ADDRESS in the server-only .env to the dedicated proxy-facing VM address.
       # The loopback default fails closed for a fresh checkout.
@@ -79,9 +76,6 @@ services:
     security_opt: ["no-new-privileges=true"]
     cap_drop: ["ALL"]
     read_only: true
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
     user: "991:991"
     tmpfs:
       - /tmp:uid=991,gid=991,mode=1777,size=16m
@@ -123,9 +117,6 @@ services:
     # MAS stores application state in external PostgreSQL; the official image has no writable
     # data volume or filesystem contract, so deny root-filesystem writes at runtime.
     read_only: true
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
     user: "991:991"
     # MAS's repeated --config files merge in order; keep the Harness identity layer last so the
     # private secret overlay cannot replace public identity.
@@ -173,9 +164,6 @@ services:
     cap_drop: ["ALL"]
     read_only: true
     user: "991:991"
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
     environment:
       - SERVER_NAME=${SERVER_NAME:?set SERVER_NAME}
     depends_on:
@@ -203,9 +191,6 @@ services:
     cap_drop: ["ALL"]
     read_only: true
     user: "991:991"
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
     command: ["/janitor"]
     environment:
       - SERVER_NAME=${SERVER_NAME:?set SERVER_NAME}
@@ -240,9 +225,6 @@ services:
     cap_drop: ["ALL"]
     read_only: true
     user: "991:991"
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
     command: ["/plan"]
     environment:
       - SERVER_NAME=${SERVER_NAME:?set SERVER_NAME}
@@ -271,9 +253,6 @@ services:
     cap_drop: ["ALL"]
     read_only: true
     user: "991:991"
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
     environment:
       - SERVER_NAME=${SERVER_NAME:?set SERVER_NAME}
       - BILLING_ENVIRONMENT=${BILLING_ENVIRONMENT:?set BILLING_ENVIRONMENT}

@@ -277,9 +277,8 @@ http://backend.{$SERVER_NAME}:8080 {
 		}
 	}
 	# Cashier has no browser surface. The provider's fixed signed webhook endpoint is the only public
-	# Cashier route; do not record it in access logs, including rejected methods.
-	@dodo_webhook_path path /webhooks/dodo
-	log_skip @dodo_webhook_path
+	# Cashier route. The shared access-log filter removes query data and credential headers while
+	# retaining the request diagnostic.
 	@dodo_webhook {
 		method POST
 		path /webhooks/dodo
