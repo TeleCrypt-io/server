@@ -10,25 +10,27 @@ composition and release contract.
 
 1. Obtain the private deployment procedure and secret-file contract from the TeleCrypt Harness
    maintained by the operator.
-2. Use the Harness guarded activator for every production validation and activation. It verifies
-   the exact state release, rendered Compose and Caddy configuration, published images,
-   `--no-build` activation, and the result record.
+2. Follow the private Harness release procedure to verify and prepare the exact state release.
+   Use its separately released `deploy` program for Docker image pulls and Compose `--no-build`
+   activation. That program reports Docker results only; it does not verify GitHub releases,
+   validate application credentials, or run application acceptance tests.
 3. Do not run direct `docker compose pull`, `up`, `run`, or equivalent production activation
-   commands from this public repository. The repository workflow validates public state; Harness
-   performs the guarded VM preflight and owns private environment and secret handling.
+   commands from this public repository. This repository's workflow validates public state;
+   the operator prepares private service configuration, and Harness owns acceptance tests.
 
 `versions.env` is the canonical image coordinate manifest and must contain exactly these five keys:
 `CADDY_IMAGE`, `SYNAPSE_IMAGE`, `MAS_IMAGE`, `CONTROLPLANE_IMAGE`, and `CASHIER_IMAGE`. The private
 environment, derived backend and public-site hostnames, ingress binding, identity overlays, and
-secret-file contract are maintained by the operator's private Harness. Harness snapshots the
-private Janitor, Plan, and Cashier records and exports each service's exact environment contract
-only to the guarded Compose process; Compose does not read live service `env_file` paths. The
-committed `.env.example` contains TEST-NET documentation values only; replace them through the private
+secret-file contract are maintained by the operator's private Harness. Compose reads the prepared
+operator, service-private, and image-version files through its native command-line `--env-file`
+interface. The service definitions have no `env_file` entries; they explicitly select each
+container's environment keys. The committed `.env.example` contains TEST-NET documentation values
+only; replace them through the private
 deployment procedure before activation.
 
 The Matrix private inputs are `${TELECRYPT_DATA_DIR}/secrets/synapse.secrets.json`,
-`${TELECRYPT_DATA_DIR}/secrets/synapse_signing.key`, and `${TELECRYPT_DATA_DIR}/secrets/mas.secrets.json`;
-Harness validates their bounded contracts before passing them as file-backed Compose secrets; the
+`${TELECRYPT_DATA_DIR}/secrets/synapse_signing.key`, and `${TELECRYPT_DATA_DIR}/secrets/mas.secrets.json`.
+The operator prepares these files for their owning applications as file-backed Compose secrets; the
 signing key is mounted as `/signing.key`. The MAS overlay contains its encryption/signing secrets,
 database URI, Matrix shared secret, and two exact environment-bound clients. Synapse loads the
 committed base, then the exact tracked nonsecret profile selected by `SERVER_NAME`, then its private
