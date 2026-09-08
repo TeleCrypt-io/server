@@ -149,9 +149,9 @@ container_redact_diagnostics() {
   local diagnostic_file="$1"
   sed -E \
     -e "s#(https?://)[^/@[:space:]]+@#\\1[redacted]@#g" \
-    -e "s#(^|[^[:alnum:]_])(([[:alnum:]_.-]*(secret|token|password|private([_-]?key)?|credential|customer|email)[[:alnum:]_.-]*)[[:space:]]*\"?[[:space:]]*[:=][[:space:]]*)(\"[^\"]*\"|'[^']*'|[^[:space:],}]+)#\\1\\2[redacted]#Ig" \
+    -e "s#(^|[^[:alnum:]_])(([[:alnum:]_.-]*(secret|token|password|private([_-]?key)?|api[_-]?key|credential|customer|email)[[:alnum:]_.-]*)[[:space:]]*\"?[[:space:]]*[:=][[:space:]]*)(\"[^\"]*\"|'[^']*'|[^[:space:],}]+)#\\1\\2[redacted]#Ig" \
     -e "s#((Authorization|Proxy-Authorization|Cookie):[[:space:]]+)[^,[:cntrl:]]+#\\1[redacted]#Ig" \
-    -e "s#(^|[^[:alnum:]_])((secret([[:space:]]+key)?|token|password|private([[:space:]]+key)?|credential|customer|email)[[:space:]]+)(\"[^\"]*\"|'[^']*'|[^[:space:],}]+)#\\1\\2[redacted]#Ig" \
+    -e "s#(^|[^[:alnum:]_])((secret([[:space:]]+key)?|token|password|private([[:space:]]+key)?|api[_-]?key|credential|customer|email)[[:space:]]+)(\"[^\"]*\"|'[^']*'|[^[:space:],}]+)#\\1\\2[redacted]#Ig" \
     -e "s#[[:alnum:]_.%+-]+@[[:alnum:].-]+#[redacted]#g" \
     -e "s#@[[:alnum:]_.=-]+:[[:alnum:].-]+#[redacted]#g" \
     -e "s#([A-Za-z0-9._-]*fixture[A-Za-z0-9._-]*)#[redacted]#Ig" \

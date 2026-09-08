@@ -542,7 +542,7 @@ class ManifestTests(unittest.TestCase):
                 (directory / f"{name}.config").write_text(json.dumps(config_document), encoding="utf-8")
                 (directory / f"{name}.metadata").write_text(json.dumps(metadata), encoding="utf-8")
 
-        with tempfile.TemporaryDirectory(prefix="server-state-image-config-") as directory:
+        with tempfile.TemporaryDirectory(delete=False, prefix="server-state-image-config-") as directory:
             root = Path(directory)
             valid = root / "valid"
             valid.mkdir()
@@ -680,7 +680,7 @@ class CaddyRouteTests(unittest.TestCase):
                 }
             }
         }
-        with tempfile.TemporaryDirectory(prefix="server-state-caddy-adapted-") as directory:
+        with tempfile.TemporaryDirectory(delete=False, prefix="server-state-caddy-adapted-") as directory:
             path = Path(directory) / "adapted.json"
             path.write_text(json.dumps(document), encoding="utf-8")
             validate.validate_adapted_caddy(path)
@@ -717,15 +717,12 @@ class GitTransportTests(unittest.TestCase):
         self.assertNotIn('"$stderr_file" 2>/dev/null', helper)
 
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory(prefix="server-state-git-")
+        self.directory = tempfile.TemporaryDirectory(delete=False, prefix="server-state-git-")
         self.root = Path(self.directory.name)
         git(self.root, "init", "--quiet")
         (self.root / "fixture").write_text("first\n", encoding="utf-8")
         git(self.root, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "add", "fixture")
         git(self.root, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "--quiet", "-m", "first")
-
-    def tearDown(self) -> None:
-        self.directory.cleanup()
 
     def run_helper(self, *args: str, **environment: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -903,7 +900,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
     def test_registry_login_uses_missing_authfile_and_password_stdin(self) -> None:
         """The login path must let Skopeo create its JSON auth file, without leaking the token."""
         helper = CONTAINER_HELPER
-        with tempfile.TemporaryDirectory(prefix="server-state-skopeo-login-") as directory:
+        with tempfile.TemporaryDirectory(delete=False, prefix="server-state-skopeo-login-") as directory:
             root = Path(directory)
             fake_skopeo = root / "skopeo"
             fake_skopeo.write_text(
@@ -964,7 +961,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertIn('container_command --sensitive "$image_list"', workflow)
 
     def test_container_diagnostics_accept_progress_and_reject_hostile_markers(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="server-state-container-diagnostics-") as directory:
+        with tempfile.TemporaryDirectory(delete=False, prefix="server-state-container-diagnostics-") as directory:
             root = Path(directory)
 
             def run(
@@ -1016,6 +1013,17 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.assertNotIn("stdout", sensitive.stdout + sensitive.stderr)
             self.assertNotIn("stderr", sensitive.stdout + sensitive.stderr)
 
+            api_key = run(
+                "import sys; sys.stdout.write('DODO_API_KEY=synthetic-secret-value\\napiKey: synthetic-secret-value\\n'); "
+                "sys.stderr.write('api-key: synthetic-secret-value\\n')",
+                sensitive=True,
+            )
+            self.assertEqual(api_key.returncode, 0)
+            self.assertNotIn("synthetic-secret-value", api_key.stdout + api_key.stderr)
+            self.assertIn("DODO_API_KEY=[redacted]", api_key.stdout + api_key.stderr)
+            self.assertIn("apiKey: [redacted]", api_key.stdout + api_key.stderr)
+            self.assertIn("api-key: [redacted]", api_key.stdout + api_key.stderr)
+
             failed = run("import sys; sys.stdout.write('partial\\n'); sys.stderr.write('ordinary diagnostic\\n'); raise SystemExit(17)")
             self.assertEqual(failed.returncode, 17, failed.stderr)
             self.assertIn("partial", failed.stderr)
@@ -1056,7 +1064,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "forbidden-mount": "forbidden-mount",
             "environment-leak": "environment-leak",
         }
-        with tempfile.TemporaryDirectory(prefix="server-state-sensitive-class-") as directory:
+        with tempfile.TemporaryDirectory(delete=False, prefix="server-state-sensitive-class-") as directory:
             root = Path(directory)
             for marker, expected in classifications.items():
                 result = subprocess.run(
@@ -1527,7 +1535,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertNotIn("fetch_release_asset CASHIER_IMAGE", text)
         for phase in ("tag-ref", "annotated-tag", "release", "asset"):
             self.assertIn(f'{phase} "$repository" "$tag"', text)
-        with tempfile.TemporaryDirectory(prefix="server-state-gh-unauthorized-") as directory:
+        with tempfile.TemporaryDirectory(delete=False, prefix="server-state-gh-unauthorized-") as directory:
             root = Path(directory)
             fake_gh = root / "gh"
             fake_gh.write_text(
@@ -1593,7 +1601,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertIn('MAX_RELEASE_ASSET_BYTES=1048576', text)
 
     def test_container_command_explicit_stdin_inheritance_is_secret_safe(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="server-state-stdin-") as directory:
+        with tempfile.TemporaryDirectory(delete=False, prefix="server-state-stdin-") as directory:
             root = Path(directory)
             output = root / "output"
             secret = "offline-fixture-secret\n"
@@ -1623,7 +1631,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.assertEqual(Path(f"{output}.stderr").read_text(encoding="utf-8"), secret)
 
     def test_container_command_keeps_stdin_closed_by_default(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="server-state-stdin-closed-") as directory:
+        with tempfile.TemporaryDirectory(delete=False, prefix="server-state-stdin-closed-") as directory:
             root = Path(directory)
             output = root / "output"
             secret = "offline-secret-must-not-reach-child\n"
