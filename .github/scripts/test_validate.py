@@ -1015,10 +1015,10 @@ class ReleaseEvidenceTests(unittest.TestCase):
 
             api_key = run(
                 "import sys; sys.stdout.write('DODO_API_KEY=synthetic-secret-value\\napiKey: synthetic-secret-value\\n'); "
-                "sys.stderr.write('api-key: synthetic-secret-value\\n')",
+                "sys.stderr.write('api-key: synthetic-secret-value\\n'); raise SystemExit(17)",
                 sensitive=True,
             )
-            self.assertEqual(api_key.returncode, 0)
+            self.assertEqual(api_key.returncode, 17)
             self.assertNotIn("synthetic-secret-value", api_key.stdout + api_key.stderr)
             self.assertIn("DODO_API_KEY=[redacted]", api_key.stdout + api_key.stderr)
             self.assertIn("apiKey: [redacted]", api_key.stdout + api_key.stderr)
