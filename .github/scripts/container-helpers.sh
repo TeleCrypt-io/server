@@ -254,7 +254,7 @@ container_command() {
   trap 'container_command_signal TERM' TERM
   set +e
   if [[ "$inherit_stdin" == true ]]; then
-    timeout --signal=TERM --kill-after=5s "${timeout_seconds}s" "$@" >"$output" 2>"$stderr_file" &
+    timeout --signal=TERM --kill-after=5s "${timeout_seconds}s" "$@" 0<&0 >"$output" 2>"$stderr_file" &
   else
     timeout --signal=TERM --kill-after=5s "${timeout_seconds}s" "$@" </dev/null >"$output" 2>"$stderr_file" &
   fi

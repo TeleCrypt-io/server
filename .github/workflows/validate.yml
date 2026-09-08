@@ -511,7 +511,8 @@ jobs:
           rm -f -- "$image_list.stderr"
           caddy_image="$(awk '/docker.io\/caddy:/ { print; exit }' "$image_list")"
           test -n "$caddy_image"
-          timeout --signal=TERM --kill-after=5s 120s docker run --rm \
+          caddy_validation="$RUNNER_TEMP/caddy-validation"
+          container_command --sensitive "$caddy_validation" 120 docker run --rm \
             --user 65532:65532 \
             --read-only \
             --security-opt no-new-privileges=true \
@@ -524,6 +525,7 @@ jobs:
             --env SERVER_NAME=example.invalid \
             --volume "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
             "$caddy_image" caddy validate --config /etc/caddy/Caddyfile
+          rm -f -- "$caddy_validation.stderr"
           caddy_adapted="$RUNNER_TEMP/caddy-adapted.json"
           container_command --sensitive "$caddy_adapted" 120 docker run --rm \
             --user 65532:65532 \

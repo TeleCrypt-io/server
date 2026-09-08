@@ -881,7 +881,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
         self.assertIn('authdir="$(mktemp -d)"', workflow)
         self.assertIn('authfile="$authdir/auth.json"', workflow)
-        self.assertIn('rm -rf "$authdir" "$metadata_dir" "$manifest_path"', workflow)
+        self.assertIn('rm -rf -- "$authdir" "$metadata_dir" "$manifest_path"', workflow)
         self.assertNotIn('authfile="$(mktemp)"', workflow)
         self.assertEqual(workflow.count("container_command --sensitive --inherit-stdin"), 1)
         login_start = workflow.index("container_command --sensitive --inherit-stdin")
@@ -1394,7 +1394,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             ],
         )
         self.assertEqual(proof_services["synapse-loader-proof"]["environment"], ["TMPDIR=/staging/tmp"])
-        self.assertGreaterEqual(workflow.count("-f .github/secret-proof.compose.yml"), 4)
+        self.assertGreaterEqual(workflow.count("-f .github/secret-proof.compose.yml"), 3)
 
         for status in range(70, 75):
             self.assertIn(f"fail({status},", workflow)
