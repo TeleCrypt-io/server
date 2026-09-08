@@ -53,9 +53,10 @@ matrix:
   kind: synapse
   endpoint: http://synapse:8008
 
-# Local passwords are accepted only by MAS's hosted OAuth human pages (for
-# registration, reauthentication, and recovery); Caddy denies Matrix
-# `/_matrix/client/*/login` password authentication. Email is optional.
+# MAS-managed passwords are accepted only by MAS's hosted OAuth human pages (for
+# registration and reauthentication). Email password recovery is currently unavailable because
+# the configured email transport is non-delivering; Caddy denies Matrix
+# `/_matrix/client/*/login` password authentication.
 passwords:
   enabled: true
 
