@@ -50,6 +50,7 @@ ineffective for fast acceptance tests because MAS 1.23 requires a positive regis
 Email and policy defaults remain in `mas.yaml`; the final runtime identity layer supplies the Janitor
 admin-client ID. The committed base configs retain reviewed nonsecret loader options, while
 credentials, database URIs, OAuth client secrets, and provider values remain outside this repository.
+Janitor requires `JANITOR_DRY_RUN=1` for either test profile; that value is rejected for the live billing profile. The MAS admin listener has no externally reachable port; no MAS port is published, and Caddy does not route this private path. The S3-compatible endpoint `sss.telecrypt.io` is reachable only from authorized production and stage Linux VMs.
 
 ## Billing operations
 
