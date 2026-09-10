@@ -871,6 +871,16 @@ class GitTransportTests(unittest.TestCase):
 
 
 class ReleaseEvidenceTests(unittest.TestCase):
+    def test_release_discovery_slurps_jsonl_matches_before_counting(self) -> None:
+        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
+        start = workflow.index("          discover_release() {")
+        end = workflow.index("          download_and_compare_manifest()", start)
+        discovery = workflow[start:end]
+        self.assertIn(
+            'capture_extract match_count "$matches_path" "$matches_path.error" -s \'length\'',
+            discovery,
+        )
+
     def test_container_commands_use_the_step_scoped_diagnostics_classifier(self) -> None:
         workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
         self.assertIn('"$mas_mounts" >/dev/null', workflow)

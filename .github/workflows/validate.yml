@@ -949,7 +949,7 @@ jobs:
               fi
               page=$((page + 1))
             done
-            if capture_extract match_count "$matches_path" "$matches_path.error" 'length'; then
+            if capture_extract match_count "$matches_path" "$matches_path.error" -s 'length'; then
               :
             else
               extraction_status="$?"
