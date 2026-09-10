@@ -175,6 +175,39 @@ class ManifestTests(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 validate.validate_synapse_environment_profiles()
 
+    def test_mas_environment_profiles_are_closed_and_exact(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        validate.validate_mas_environment_profiles()
+        expected = {
+            "telecrypt.io": {"burst": 100, "per_second": 2.0},
+            "stage.telecrypt.io": {"burst": 100000, "per_second": 1000.0},
+        }
+        self.assertEqual(
+            validate.MAS_ENVIRONMENT_FILES,
+            {
+                "telecrypt.io": "mas.telecrypt.io.yaml",
+                "stage.telecrypt.io": "mas.stage.telecrypt.io.yaml",
+            },
+        )
+        for server_name, filename in validate.MAS_ENVIRONMENT_FILES.items():
+            self.assertEqual(validate.mas_environment_path(server_name), root / filename)
+            self.assertEqual(
+                yaml.safe_load((root / filename).read_text(encoding="utf-8"))["rate_limiting"]["registration"],
+                expected[server_name],
+            )
+        for invalid in ("", "telecrypt.io.evil", "stage.telecrypt.io.evil"):
+            with self.subTest(invalid=invalid), self.assertRaises(AssertionError):
+                validate.mas_environment_path(invalid)
+
+        compose = (root / "compose.yml").read_text(encoding="utf-8")
+        mas = validate.service_section(compose, "mas")
+        self.assertIn("./mas.${SERVER_NAME:?set SERVER_NAME}.yaml:/mas-environment.yaml:ro", mas)
+        self.assertIn(
+            'command: ["server", "--config=/config.yaml", "--config=/mas-environment.yaml", "--config=/secrets.json", "--config=/runtime-identity.yaml"]',
+            mas,
+        )
+        self.assertNotIn("rate_limiting:", (root / "mas.yaml").read_text(encoding="utf-8"))
+
     def test_synapse_mas_peer_is_internal_and_egress_isolated(self) -> None:
         compose = (Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8")
         self.assertEqual(validate.EGRESS_NETWORKS["synapse"], "synapse_egress_net")
@@ -385,7 +418,7 @@ class ManifestTests(unittest.TestCase):
         self.assertIn("reachable only from authorized production and stage Linux VMs", readme)
         self.assertNotIn("s3.telecrypt.io", synapse + workflow + readme)
         self.assertRegex(signing_fixture, r"\Aed25519 0 [A-Za-z0-9+/]{43}\n\Z")
-        self.assertIn("config check --config=/config.yaml --config=/secrets.json", workflow)
+        self.assertIn("config check --config=/config.yaml --config=/mas-environment.yaml --config=/secrets.json", workflow)
         self.assertIn(
             '["-c", "/homeserver.yaml", "-c", profile_path, "-c", "/secrets.json", "-c", "/runtime-identity.yaml"]',
             workflow,
@@ -571,7 +604,7 @@ class CaddyRouteTests(unittest.TestCase):
         compose = (root / "compose.yml").read_text(encoding="utf-8")
         self.caddy_body = validate.service_section(compose, "caddy")
 
-    def test_media_deletion_route_is_exact_bounded_and_before_generic_matrix_proxy(self) -> None:
+    def test_media_deletion_route_is_exact_and_before_generic_matrix_proxy(self) -> None:
         path = "/_matrix/client/unstable/io.telecrypt.storage/delete_media"
         options = self.caddy.index("@telecrypt_delete_media_options {")
         post = self.caddy.index("@telecrypt_delete_media {")
@@ -580,7 +613,7 @@ class CaddyRouteTests(unittest.TestCase):
         self.assertLess(post, generic)
         self.assertIn("method POST", self.caddy[post:self.caddy.index("\n\t}", post)])
         self.assertIn(f"path {path}", self.caddy[post:self.caddy.index("\n\t}", post)])
-        self.assertIn("max_size 32KiB", self.caddy[post:generic])
+        self.assertNotIn("request_body", self.caddy[post:generic])
 
     def test_media_deletion_preflight_is_exact_origin_post_only_and_narrow(self) -> None:
         path = "/_matrix/client/unstable/io.telecrypt.storage/delete_media"
@@ -1315,7 +1348,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "cleanup",
         ):
             self.assertIn(f"mas_failure {phase}", workflow)
-        self.assertIn('([.[].Destination] | sort) == ["/config.yaml", "/runtime-identity.yaml", "/secrets.json"]', workflow)
+        self.assertIn('([.[].Destination] | sort) == ["/config.yaml", "/mas-environment.yaml", "/runtime-identity.yaml", "/secrets.json"]', workflow)
         self.assertIn('all(.[]; .RW == false)', workflow)
         self.assertNotIn("--config=/signing.key", workflow)
         self.assertIn('echo "MAS secret proof failed: $1"', workflow)
@@ -1397,9 +1430,13 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertEqual(
             proof_services["synapse-loader-proof"]["tmpfs"],
             [
-                "/tmp:uid=991,gid=991,mode=1777,size=16m",
-                "/staging:uid=991,gid=991,mode=0700,size=16m",
+                "/tmp:uid=991,gid=991,mode=1777",
+                "/staging:uid=991,gid=991,mode=0700",
             ],
+        )
+        self.assertIn(
+            "../mas.${SERVER_NAME:?set SERVER_NAME}.yaml:/mas-environment.yaml:ro",
+            proof_services["mas-secret-proof"]["volumes"],
         )
         self.assertEqual(proof_services["synapse-loader-proof"]["environment"], ["TMPDIR=/staging/tmp"])
         self.assertGreaterEqual(workflow.count("-f .github/secret-proof.compose.yml"), 3)

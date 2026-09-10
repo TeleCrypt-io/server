@@ -218,7 +218,7 @@ http://backend.{$SERVER_NAME}:8080 {
 		respond "" 204
 	}
 
-	# Reject other methods at the edge and cap accepted deletion batches before proxying them.
+	# Reject other methods at the edge and proxy authenticated deletion requests to Synapse.
 	@telecrypt_delete_media_other_method {
 		path /_matrix/client/unstable/io.telecrypt.storage/delete_media
 		not method POST
@@ -232,9 +232,6 @@ http://backend.{$SERVER_NAME}:8080 {
 		path /_matrix/client/unstable/io.telecrypt.storage/delete_media
 	}
 	handle @telecrypt_delete_media {
-		request_body {
-			max_size 32KiB
-		}
 		reverse_proxy synapse:8008 {
 			import strip_untrusted_client_ip
 		}

@@ -1,0 +1,6 @@
+# MAS production profile. Registration has a generous finite backstop: all requests arrive through
+# Caddy, whose peer address is the source MAS sees because forwarded client-IP headers are not trusted.
+rate_limiting:
+  registration:
+    burst: 100
+    per_second: 2.0

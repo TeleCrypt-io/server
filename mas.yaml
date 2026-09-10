@@ -1,8 +1,8 @@
 # Matrix Authentication Service — committed base config. Contains NO secrets.
-# Secret-bearing top-level keys (secrets, database, matrix) and the two static
-# client credentials live in the gitignored JSON file, merged after this base and before the final
-# Harness identity layer. The identity layer is last so this private overlay cannot replace public
-# identity.
+# Secret-bearing top-level keys (secrets, database, matrix) and the two static client credentials
+# live in the gitignored JSON file. The exact SERVER_NAME-selected nonsecret profile owns the
+# registration rate. Both are merged after this base and before the final Harness identity layer,
+# which remains last so private configuration cannot replace public identity.
 #
 # The Harness writes http.public_base, http.issuer, and
 # experimental.plan_management_iframe_uri to the runtime identity layer before Compose validation.
@@ -59,13 +59,6 @@ matrix:
 # `/_matrix/client/*/login` password authentication.
 passwords:
   enabled: true
-
-# The Agents endpoint has one global limiter; all requests arrive through Caddy, whose peer address
-# is the source used by MAS because forwarded client-IP headers are not trusted.
-rate_limiting:
-  registration:
-    burst: 100
-    per_second: 2.0
 
 account:
   password_registration_enabled: true

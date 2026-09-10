@@ -276,7 +276,7 @@ jobs:
           if ! container_command --sensitive "$mas_output" 120 docker compose --ansi never --env-file .env.example \
             -f .github/secret-proof.compose.yml run \
             --name "$mas_container" --no-deps -T --entrypoint /usr/local/bin/mas-cli mas-secret-proof \
-            config check --config=/config.yaml --config=/secrets.json --config=/runtime-identity.yaml; then
+            config check --config=/config.yaml --config=/mas-environment.yaml --config=/secrets.json --config=/runtime-identity.yaml; then
             mas_failure config-check
           fi
           if ! mas_check="$(<"$mas_output")"; then
@@ -293,8 +293,8 @@ jobs:
             mas_failure mount-inspection
           fi
           if ! jq -e '
-            type == "array" and length == 3 and
-            ([.[].Destination] | sort) == ["/config.yaml", "/runtime-identity.yaml", "/secrets.json"] and
+            type == "array" and length == 4 and
+            ([.[].Destination] | sort) == ["/config.yaml", "/mas-environment.yaml", "/runtime-identity.yaml", "/secrets.json"] and
             all(.[]; .RW == false)
           ' "$mas_mounts" >/dev/null; then
             mas_failure mount-contract
@@ -312,7 +312,7 @@ jobs:
             mas_failure cleanup
           fi
           trap - EXIT
-          echo "MAS uid 991 read its own file-backed secret and had only its three declared mounts"
+          echo "MAS uid 991 read its own file-backed secret and had only its four declared mounts"
 
       - name: Verify pinned Synapse JSON config loader
         run: |

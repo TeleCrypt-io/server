@@ -105,11 +105,11 @@ for _service in ("janitor", "plan", "cashier"):
     SERVICE_ENV_KEYS[_service].add("BILLING_ENVIRONMENT")
 EXPECTED_TMPFS = {
     "caddy": ["/config/caddy:uid=65532,gid=65532,mode=0700", "/data/caddy:uid=65532,gid=65532,mode=0700"],
-    "synapse": ["/tmp:uid=991,gid=991,mode=1777,size=16m"],
+    "synapse": ["/tmp:uid=991,gid=991,mode=1777"],
 }
 EXPECTED_HEALTHCHECKS = {
     "synapse": {"test": ["CMD", "curl", "-fSs", "http://localhost:8008/health"], "interval": "15s", "timeout": "5s", "retries": 3, "start_period": "15s"},
-    "mas": {"test": ["CMD", "/usr/local/bin/mas-cli", "config", "check", "--config=/config.yaml", "--config=/secrets.json", "--config=/runtime-identity.yaml"], "interval": "15s", "timeout": "5s", "retries": 5, "start_period": "30s"},
+    "mas": {"test": ["CMD", "/usr/local/bin/mas-cli", "config", "check", "--config=/config.yaml", "--config=/mas-environment.yaml", "--config=/secrets.json", "--config=/runtime-identity.yaml"], "interval": "15s", "timeout": "5s", "retries": 5, "start_period": "30s"},
     "cashier": {"test": ["CMD", "/cashier", "healthcheck"], "interval": "15s", "timeout": "5s", "retries": 5, "start_period": "30s"},
 }
 EXPECTED_DEPENDS_ON = {
@@ -248,6 +248,14 @@ SYNAPSE_ENVIRONMENT_VALUES = {
         "rc_room_creation": {"per_second": 1000, "burst_count": 1000},
     },
 }
+MAS_ENVIRONMENT_FILES = {
+    "telecrypt.io": "mas.telecrypt.io.yaml",
+    "stage.telecrypt.io": "mas.stage.telecrypt.io.yaml",
+}
+MAS_ENVIRONMENT_VALUES = {
+    "telecrypt.io": {"burst": 100, "per_second": 2.0},
+    "stage.telecrypt.io": {"burst": 100000, "per_second": 1000.0},
+}
 
 
 def synapse_environment_path(server_name: str) -> Path:
@@ -280,6 +288,37 @@ def validate_synapse_environment_profiles() -> None:
                 f"  burst_count: {values['burst_count']}",
             ])
         check(data_lines == expected, (server_name, "profile canonical shape", data_lines))
+
+
+def mas_environment_path(server_name: str) -> Path:
+    check(server_name in MAS_ENVIRONMENT_FILES, ("SERVER_NAME", server_name))
+    return ROOT / MAS_ENVIRONMENT_FILES[server_name]
+
+
+def validate_mas_environment_profiles() -> None:
+    """Validate the exact production and deliberately fast Stage registration profiles."""
+    check(set(MAS_ENVIRONMENT_FILES) == {"telecrypt.io", "stage.telecrypt.io"}, "MAS profile names")
+    check(set(MAS_ENVIRONMENT_FILES.values()) == {
+        "mas.telecrypt.io.yaml", "mas.stage.telecrypt.io.yaml",
+    }, "MAS profile files")
+    for server_name, filename in MAS_ENVIRONMENT_FILES.items():
+        path = mas_environment_path(server_name)
+        check(path.name == filename and path.is_file() and not path.is_symlink(), (server_name, "MAS profile file"))
+        text = path.read_text(encoding="utf-8")
+        check(text.endswith("\n") and not text.endswith("\n\n"), (server_name, "MAS profile newline"))
+        values = MAS_ENVIRONMENT_VALUES[server_name]
+        data_lines = [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+        check(data_lines == [
+            "rate_limiting:",
+            "  registration:",
+            f"    burst: {values['burst']}",
+            f"    per_second: {values['per_second']}",
+        ], (server_name, "MAS profile canonical shape", data_lines))
+    check(
+        MAS_ENVIRONMENT_VALUES["telecrypt.io"] == {"burst": 100, "per_second": 2.0}
+        and MAS_ENVIRONMENT_VALUES["stage.telecrypt.io"] == {"burst": 100000, "per_second": 1000.0},
+        "MAS environment rates",
+    )
 
 
 def validate_profile(env: dict[str, str]) -> tuple[str, str]:
@@ -558,10 +597,9 @@ def validate_caddy(caddy: str, caddy_body: str) -> None:
     delete_handle = re.search(r"(?ms)^\thandle @telecrypt_delete_media \{.*?^\t\}", caddy)
     check(
         delete_handle
-        and "request_body" in delete_handle.group(0)
-        and "max_size 32KiB" in delete_handle.group(0)
+        and "request_body" not in delete_handle.group(0)
         and "reverse_proxy synapse:8008" in delete_handle.group(0),
-        "media deletion body limit/proxy",
+        "media deletion proxy",
     )
     check(
         caddy.index("@telecrypt_delete_media_options") < caddy.index("@telecrypt_delete_media_other_method")
@@ -632,7 +670,11 @@ def validate_caddy_negative(caddy: str, body: str) -> None:
             "\t@telecrypt_delete_media {\n",
             1,
         ),
-        caddy.replace("\t\tmax_size 32KiB\n", "\t\tmax_size 128MiB\n", 1),
+        caddy.replace(
+            "\thandle @telecrypt_delete_media {\n",
+            "\thandle @telecrypt_delete_media {\n\t\trequest_body { max_size 32KiB }\n",
+            1,
+        ),
         caddy.replace("\t\tmethod GET\n\t\tpath /.well-known/matrix/client", "\t\tmethod POST\n\t\tpath /.well-known/matrix/client", 1),
         caddy.replace(
             '\thandle /.well-known/matrix/server {\n\t\trespond "Not Found" 404\n\t}\n',
@@ -809,6 +851,7 @@ def validate_source(values: dict[str, str]) -> None:
         "Synapse listeners/upload/staging",
     )
     validate_synapse_environment_profiles()
+    validate_mas_environment_profiles()
     check(
         "./synapse.${SERVER_NAME:?set SERVER_NAME}.yaml:/synapse-environment.yaml:ro" in sections["synapse"],
         "Synapse environment profile mount",
@@ -817,6 +860,15 @@ def validate_source(values: dict[str, str]) -> None:
         'command: ["-c", "/homeserver.yaml", "-c", "/synapse-environment.yaml", "-c", "/secrets.json", "-c", "/runtime-identity.yaml"]' in sections["synapse"],
         "Synapse config order",
     )
+    check(
+        "./mas.${SERVER_NAME:?set SERVER_NAME}.yaml:/mas-environment.yaml:ro" in sections["mas"],
+        "MAS environment profile mount",
+    )
+    check(
+        'command: ["server", "--config=/config.yaml", "--config=/mas-environment.yaml", "--config=/secrets.json", "--config=/runtime-identity.yaml"]' in sections["mas"],
+        "MAS config order",
+    )
+    check(not re.search(r"^rate_limiting:\s*$", mas, re.MULTILINE), "MAS base owns no environment rate")
     check("url_preview_enabled: false" in synapse, "Synapse URL previews disabled")
     validate_synapse_prejoin_state(synapse)
     synapse_fixture = json.loads(
@@ -919,6 +971,7 @@ def validate_rendered(path: Path) -> None:
     document = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=pairs)
     check(isinstance(document, dict) and set(document) == {"name", "services", "networks", "secrets"}, "Compose document shape")
     validate_synapse_environment_profiles()
+    validate_mas_environment_profiles()
     validate_mas_listeners((ROOT / "mas.yaml").read_text(encoding="utf-8"))
     services, networks = document["services"], document["networks"]
     check(set(services) == set(SERVICES) and set(networks) == set({name for names in SERVICE_NETWORKS.values() for name in names}), "Compose topology")
@@ -1043,7 +1096,11 @@ def validate_rendered(path: Path) -> None:
             "/log.config": (str(ROOT / "synapse.log.config"), True),
             "/staging": (f"{data_dir}/runtime/synapse-staging", False),
         },
-        "mas": {"/config.yaml": (str(ROOT / "mas.yaml"), True), "/runtime-identity.yaml": (f"{data_dir}/runtime/mas.identity.yaml", True)},
+        "mas": {
+            "/config.yaml": (str(ROOT / "mas.yaml"), True),
+            "/mas-environment.yaml": (str(mas_environment_path(env["SERVER_NAME"])), True),
+            "/runtime-identity.yaml": (f"{data_dir}/runtime/mas.identity.yaml", True),
+        },
     }
     for service, expected in expected_mounts.items():
         found = _mounts(services[service])
@@ -1057,7 +1114,7 @@ def validate_rendered(path: Path) -> None:
         == ["-c", "/homeserver.yaml", "-c", "/synapse-environment.yaml", "-c", "/secrets.json", "-c", "/runtime-identity.yaml"],
         "Synapse config order",
     )
-    check(services["mas"].get("command") == ["server", "--config=/config.yaml", "--config=/secrets.json", "--config=/runtime-identity.yaml"], "MAS config order")
+    check(services["mas"].get("command") == ["server", "--config=/config.yaml", "--config=/mas-environment.yaml", "--config=/secrets.json", "--config=/runtime-identity.yaml"], "MAS config order")
     check(services["janitor"].get("command") == ["/janitor"] and services["plan"].get("command") == ["/plan"], "service commands")
     for service in ("caddy", "mas", "registration", "janitor", "plan", "cashier"):
         # Compose's JSON model materializes an omitted entrypoint as null.  A non-null value

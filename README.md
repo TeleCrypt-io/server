@@ -36,12 +36,17 @@ database URI, Matrix shared secret, and two exact environment-bound clients. Syn
 committed base, then the exact tracked nonsecret profile selected by `SERVER_NAME`, then its private
 JSON overlay, and finally the runtime identity layer. The two profile files contain only the explicit
 request-mutation limiters: production keeps Synapse's standard `rc_message` (`per_second: 0.2`,
-`burst_count: 10`) and `rc_room_creation` (`per_second: 0.016`, `burst_count: 10`), while stage uses
-finite `per_second: 1000` and `burst_count: 1000` values for both settings so parallel acceptance
-tests do not spend their time in Synapse's production throttles. Synapse's config files are
+`burst_count: 10`) and `rc_room_creation` (`per_second: 0.016`, `burst_count: 10`), while Stage uses
+deliberately unsafe `per_second: 1000` and `burst_count: 1000` values for both settings so acceptance
+tests do not spend their time in Synapse's production throttles. This production-bounded,
+Stage-fast split is a deliberate product and testing decision. Synapse's config files are
 shallow-merged by top-level key, so its private overlay owns each complete `database` and
 `matrix_authentication_service` map; the committed base and profile contain no partial map that
 could overwrite it.
+MAS follows the same environment split through the exact `SERVER_NAME`-selected `mas.*.yaml`
+profile. Production permits a burst of 100 registrations and replenishes at two per second. Stage
+permits a burst of 100,000 and replenishes at 1,000 per second, deliberately making this protection
+ineffective for fast acceptance tests because MAS 1.23 requires a positive registration limiter.
 Email and policy defaults remain in `mas.yaml`; the final runtime identity layer supplies the Janitor
 admin-client ID. The committed base configs retain reviewed nonsecret loader options, while
 credentials, database URIs, OAuth client secrets, and provider values remain outside this repository.

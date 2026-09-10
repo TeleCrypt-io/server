@@ -1,0 +1,6 @@
+# MAS Stage profile. These deliberately unsafe values make registration throttling immaterial to
+# parallel acceptance tests while retaining the positive values required by MAS 1.23's schema.
+rate_limiting:
+  registration:
+    burst: 100000
+    per_second: 1000.0
