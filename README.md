@@ -44,11 +44,15 @@ shallow-merged by top-level key, so its private overlay owns each complete `data
 `matrix_authentication_service` map; the committed base and profile contain no partial map that
 could overwrite it.
 MAS follows the same environment split through the exact `SERVER_NAME`-selected `mas.*.yaml`
-profile. Production permits a burst of 100 registrations and replenishes at two per second. Stage
-permits a burst of 100,000 and replenishes at 1,000 per second, deliberately making this protection
-ineffective for fast acceptance tests because MAS 1.23 requires a positive registration limiter.
-Email and policy defaults remain in `mas.yaml`; the final runtime identity layer supplies the Janitor
-admin-client ID. The committed base configs retain reviewed nonsecret loader options, while
+profile. Production keeps the reviewed login defaults (per-IP burst 3 replenishing at 0.05 per
+second, per-account burst 1,800 replenishing at 0.5 per second) and permits a burst of 100
+registrations replenishing at two per second. Stage deliberately disables those login and
+registration backstops for fast parallel acceptance tests: both login buckets and the registration
+bucket have a burst of 100,000 and replenish at 1,000 per second. The Stage overrides are limited
+to the buckets that the acceptance flow exercises; email, recovery, and policy defaults remain in
+`mas.yaml`. MAS 1.23 requires positive limiter values, so these explicit Stage values preserve the
+schema while keeping the test profile unsafely fast. The final runtime identity layer supplies the
+Janitor admin-client ID. The committed base configs retain reviewed nonsecret loader options, while
 credentials, database URIs, OAuth client secrets, and provider values remain outside this repository.
 Janitor requires `JANITOR_DRY_RUN=1` for either test profile; that value is rejected for the live billing profile. The MAS admin listener has no externally reachable port; no MAS port is published, and Caddy does not route this private path. The S3-compatible endpoint `sss.telecrypt.io` is reachable only from authorized production and stage Linux VMs.
 

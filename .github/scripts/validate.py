@@ -256,6 +256,10 @@ MAS_ENVIRONMENT_VALUES = {
     "telecrypt.io": {"burst": 100, "per_second": 2.0},
     "stage.telecrypt.io": {"burst": 100000, "per_second": 1000.0},
 }
+MAS_STAGE_LOGIN_VALUES = {
+    "per_ip": {"burst": 100000, "per_second": 1000.0},
+    "per_account": {"burst": 100000, "per_second": 1000.0},
+}
 
 
 def synapse_environment_path(server_name: str) -> Path:
@@ -296,7 +300,7 @@ def mas_environment_path(server_name: str) -> Path:
 
 
 def validate_mas_environment_profiles() -> None:
-    """Validate the exact production and deliberately fast Stage registration profiles."""
+    """Validate the exact production and deliberately fast Stage MAS profiles."""
     check(set(MAS_ENVIRONMENT_FILES) == {"telecrypt.io", "stage.telecrypt.io"}, "MAS profile names")
     check(set(MAS_ENVIRONMENT_FILES.values()) == {
         "mas.telecrypt.io.yaml", "mas.stage.telecrypt.io.yaml",
@@ -308,12 +312,23 @@ def validate_mas_environment_profiles() -> None:
         check(text.endswith("\n") and not text.endswith("\n\n"), (server_name, "MAS profile newline"))
         values = MAS_ENVIRONMENT_VALUES[server_name]
         data_lines = [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
-        check(data_lines == [
-            "rate_limiting:",
+        expected = ["rate_limiting:"]
+        if server_name == "stage.telecrypt.io":
+            expected.extend([
+                "  login:",
+                "    per_ip:",
+                f"      burst: {MAS_STAGE_LOGIN_VALUES['per_ip']['burst']}",
+                f"      per_second: {MAS_STAGE_LOGIN_VALUES['per_ip']['per_second']}",
+                "    per_account:",
+                f"      burst: {MAS_STAGE_LOGIN_VALUES['per_account']['burst']}",
+                f"      per_second: {MAS_STAGE_LOGIN_VALUES['per_account']['per_second']}",
+            ])
+        expected.extend([
             "  registration:",
             f"    burst: {values['burst']}",
             f"    per_second: {values['per_second']}",
-        ], (server_name, "MAS profile canonical shape", data_lines))
+        ])
+        check(data_lines == expected, (server_name, "MAS profile canonical shape", data_lines))
     check(
         MAS_ENVIRONMENT_VALUES["telecrypt.io"] == {"burst": 100, "per_second": 2.0}
         and MAS_ENVIRONMENT_VALUES["stage.telecrypt.io"] == {"burst": 100000, "per_second": 1000.0},

@@ -191,10 +191,10 @@ class ManifestTests(unittest.TestCase):
         )
         for server_name, filename in validate.MAS_ENVIRONMENT_FILES.items():
             self.assertEqual(validate.mas_environment_path(server_name), root / filename)
-            self.assertEqual(
-                yaml.safe_load((root / filename).read_text(encoding="utf-8"))["rate_limiting"]["registration"],
-                expected[server_name],
-            )
+            document = yaml.safe_load((root / filename).read_text(encoding="utf-8"))
+            self.assertEqual(document["rate_limiting"]["registration"], expected[server_name])
+            if server_name == "stage.telecrypt.io":
+                self.assertEqual(document["rate_limiting"]["login"], validate.MAS_STAGE_LOGIN_VALUES)
         for invalid in ("", "telecrypt.io.evil", "stage.telecrypt.io.evil"):
             with self.subTest(invalid=invalid), self.assertRaises(AssertionError):
                 validate.mas_environment_path(invalid)
