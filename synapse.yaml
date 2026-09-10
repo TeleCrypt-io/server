@@ -75,7 +75,6 @@ modules:
   - module: tier_controller.TierController
     config:
       restricted_room_cap: 3
-      media_store_path: /staging/media
 
 # Modern client features (Element X / sliding sync / Element Call delay events).
 experimental_features:
