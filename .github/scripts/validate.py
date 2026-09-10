@@ -84,7 +84,7 @@ SYNAPSE_LABELS = (
     "org.opencontainers.image.source", "org.opencontainers.image.revision", "org.opencontainers.image.version",
     "org.opencontainers.image.base.name", "org.opencontainers.image.base.version",
     "org.telecrypt.controlplane.release", "org.telecrypt.s3-provider.version",
-    "org.telecrypt.controlplane.wheel.sha256", "org.telecrypt.s3-provider.archive.sha256",
+    "org.telecrypt.controlplane.wheel.sha256", "org.telecrypt.s3-provider.fork.archive.sha256",
 )
 IMAGE_CONFIG = {
     "CADDY_IMAGE": {"Entrypoint": None, "Cmd": ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]},
@@ -1159,7 +1159,7 @@ def validate_synapse_provenance(inspect_labels: object, config_labels: object, v
         check(labels.get("org.telecrypt.controlplane.release") == expected_controlplane_version, "embedded Controlplane release")
         check(re.fullmatch(r"v?\d+\.\d+\.\d+", labels.get("org.opencontainers.image.base.version", "")), "Synapse base version")
         check(re.fullmatch(r"v?\d+\.\d+\.\d+", labels.get("org.telecrypt.s3-provider.version", "")), "S3 provider version")
-        for label in ("org.telecrypt.controlplane.wheel.sha256", "org.telecrypt.s3-provider.archive.sha256"):
+        for label in ("org.telecrypt.controlplane.wheel.sha256", "org.telecrypt.s3-provider.fork.archive.sha256"):
             check(re.fullmatch(r"[0-9a-f]{64}", labels.get(label, "")), label)
     check(all(inspect_labels[label] == config_labels[label] for label in SYNAPSE_LABELS), "Synapse metadata channel mismatch")
 

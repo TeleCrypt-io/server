@@ -513,7 +513,7 @@ class ManifestTests(unittest.TestCase):
             "org.telecrypt.controlplane.release": controlplane_version,
             "org.telecrypt.s3-provider.version": "1.7.0",
             "org.telecrypt.controlplane.wheel.sha256": "a" * 64,
-            "org.telecrypt.s3-provider.archive.sha256": "b" * 64,
+            "org.telecrypt.s3-provider.fork.archive.sha256": "b" * 64,
         }
         validate.validate_synapse_provenance(labels, dict(labels), "1.159-tc3", controlplane_version)
         with self.assertRaises(AssertionError):
@@ -538,7 +538,7 @@ class ManifestTests(unittest.TestCase):
             "org.telecrypt.controlplane.release": values["CONTROLPLANE_IMAGE"].rsplit(":", 1)[1],
             "org.telecrypt.s3-provider.version": "1.7.0",
             "org.telecrypt.controlplane.wheel.sha256": "b" * 64,
-            "org.telecrypt.s3-provider.archive.sha256": "c" * 64,
+            "org.telecrypt.s3-provider.fork.archive.sha256": "c" * 64,
         }
         product_labels = {
             key: {
