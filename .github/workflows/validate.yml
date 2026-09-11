@@ -111,7 +111,7 @@ jobs:
           # Nonsecret CI placeholders satisfy Compose's required interpolation. Harness supplies
           # the snapshotted private values on the authorized deployment path.
           private_keys=(
-            MAS_ADMIN_CLIENT_ID MAS_ADMIN_CLIENT_SECRET JANITOR_DB_URL OWNER_EMAIL JANITOR_DRY_RUN
+            MAS_ADMIN_CLIENT_ID MAS_ADMIN_CLIENT_SECRET JANITOR_DB_URL OWNER_EMAIL
             SMTP_HOST SMTP_USERNAME SMTP_PASSWORD SMTP_FROM
             MAS_OIDC_CLIENT_ID MAS_OIDC_CLIENT_SECRET PLAN_SESSION_KEY PLAN_ASSERTION_PRIVATE_KEY
             SYNAPSE_ADMIN_TOKEN CASHIER_DB_URL DODO_API_KEY DODO_WEBHOOK_SECRET DODO_PRODUCT_ID

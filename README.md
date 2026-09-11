@@ -54,7 +54,7 @@ to the buckets that the acceptance flow exercises; email, recovery, and policy d
 schema while keeping the test profile unsafely fast. The final runtime identity layer supplies the
 Janitor admin-client ID. The committed base configs retain reviewed nonsecret loader options, while
 credentials, database URIs, OAuth client secrets, and provider values remain outside this repository.
-Janitor requires `JANITOR_DRY_RUN=1` for either test profile; that value is rejected for the live billing profile. The MAS admin listener has no externally reachable port; no MAS port is published, and Caddy does not route this private path. The S3-compatible endpoint `sss.telecrypt.io` is reachable only from authorized production and stage Linux VMs.
+Janitor runs real lock sweeps in both the isolated test profiles and the live profile; it has no dry-run mode. Each profile uses its own exact MAS deployment, database, and deployment-identity binding. This source behavior is not Stage acceptance: do not enable an unattended Stage timer until a controlled run-owned account test and the paid-entitlement/lock race policy are accepted; Janitor has no unlock path for a lock that races a later payment. The MAS admin listener has no externally reachable port; no MAS port is published, and Caddy does not route this private path. The S3-compatible endpoint `sss.telecrypt.io` is reachable only from authorized production and stage Linux VMs.
 
 ## Billing operations
 

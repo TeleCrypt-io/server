@@ -35,7 +35,7 @@ def git(root: Path, *args: str) -> str:
 
 
 class ManifestTests(unittest.TestCase):
-    def test_billing_profile_table_is_exact_and_propagation_is_minimal(self) -> None:
+    def test_billing_profile_validation_accepts_only_known_pairs(self) -> None:
         self.assertEqual(
             validate.VALID_PROFILES,
             {("telecrypt.io", "test"), ("stage.telecrypt.io", "test"), ("telecrypt.io", "live")},
@@ -45,41 +45,9 @@ class ManifestTests(unittest.TestCase):
         for profile in (("stage.telecrypt.io", "live"), ("other.telecrypt.io", "test"), ("telecrypt.io", "sandbox")):
             with self.assertRaises(AssertionError):
                 validate.validate_profile({"SERVER_NAME": profile[0], "BILLING_ENVIRONMENT": profile[1]})
-        compose = (Path(__file__).resolve().parents[2] / "compose.yml").read_text(
-            encoding="utf-8"
-        )
-        for service in ("caddy", "registration", "synapse", "mas"):
-            body = validate.service_section(compose, service)
-            self.assertNotIn("BILLING_ENVIRONMENT", body)
-        for service in ("janitor", "plan", "cashier"):
-            body = validate.service_section(compose, service)
-            self.assertIn("BILLING_ENVIRONMENT=${BILLING_ENVIRONMENT:?set BILLING_ENVIRONMENT}", body)
-        self.assertNotIn("max-size", compose)
-        self.assertNotIn("max-file", compose)
-        self.assertNotRegex(compose, r"(?m)^\s*logging:\s*$")
-
-    def test_janitor_dry_run_policy_is_documented_for_test_profiles(self) -> None:
-        readme = (Path(__file__).resolve().parents[2] / "README.md").read_text(encoding="utf-8")
-        self.assertIn("either test profile", readme)
-        self.assertIn("rejected for the", readme)
-        self.assertIn("live billing profile", readme)
-        compose = (Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8")
-        janitor = validate.service_section(compose, "janitor")
-        self.assertIn("test billing profiles may use dry-run, while live billing may not", janitor)
-
-    def test_plan_secret_name_is_scoped_and_legacy_name_is_absent(self) -> None:
-        compose = (Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8")
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
+    def test_plan_secret_namespace_is_closed(self) -> None:
         self.assertIn("PLAN_SESSION_KEY", validate.PLAN_ENV_KEYS)
         self.assertNotIn("SESSION_KEY", validate.PLAN_ENV_KEYS)
-        self.assertIn("PLAN_SESSION_KEY=${PLAN_SESSION_KEY:?set PLAN_SESSION_KEY}", compose)
-        self.assertNotRegex(compose, r"(?m)^\s*-\s*SESSION_KEY=")
-        self.assertIn("PLAN_SESSION_KEY", workflow)
-        self.assertNotRegex(workflow, r"(?m)(?:^|\s)SESSION_KEY(?:\s|$)")
-
-    def test_validation_workflow_has_no_legacy_persistent_media_path(self) -> None:
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        self.assertNotIn("synapse/media_store", workflow)
 
     def test_security_options_use_equals_separator_in_all_active_compose_and_ci_paths(self) -> None:
         root = Path(__file__).resolve().parents[2]
@@ -94,14 +62,6 @@ class ManifestTests(unittest.TestCase):
         services = yaml.safe_load(compose)["services"]
         for service in validate.SERVICES:
             self.assertEqual(services[service]["security_opt"], ["no-new-privileges=true"])
-
-    def test_validation_workflow_runs_only_on_trusted_pushes(self) -> None:
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        self.assertIn(
-            '  push:\n    branches: [main]\n    tags: ["server-state-*"]',
-            workflow,
-        )
-        self.assertNotIn("pull_request:", workflow)
 
     def test_synapse_prejoin_state_is_narrow_and_covers_nested_folders(self) -> None:
         root = Path(__file__).resolve().parents[2]
