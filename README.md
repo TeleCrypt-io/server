@@ -52,14 +52,17 @@ bucket have a burst of 100,000 and replenish at 1,000 per second. The Stage over
 to the buckets that the acceptance flow exercises; email, recovery, and policy defaults remain in
 `mas.yaml`. MAS 1.23 requires positive limiter values, so these explicit Stage values preserve the
 schema while keeping the test profile unsafely fast. The final runtime identity layer supplies the
-Janitor admin-client ID. The committed base configs retain reviewed nonsecret loader options, while
-credentials, database URIs, OAuth client secrets, and provider values remain outside this repository.
+shared Plan/Janitor admin-client ID. The committed base configs retain reviewed nonsecret loader
+options, while credentials, database URIs, OAuth client secrets, and provider values remain outside this repository.
 Janitor runs real lock sweeps in both the isolated test profiles and the live profile; it has no
 dry-run mode. Each profile uses its own exact MAS deployment, database, and deployment-identity
 binding. A payment concurrent with a lock may leave a paid member locked; the accepted recovery
 policy is manual unlocking by the paying team owner through Plan, restricted to their own team.
-Payment does not automatically unlock the member. Keep the Stage timer disabled until controlled
-Stage account tests verify actual locking, paid-account exclusion, existing-session access loss,
+Payment does not automatically unlock the member. Plan uses the existing `MAS_ADMIN_CLIENT_ID`
+and `MAS_ADMIN_CLIENT_SECRET` shared with Janitor through the internal `mas_admin_net` at
+`http://mas-admin:8081`; its browser OIDC client stays separate. Plan checks Cashier's
+authoritative owner, active-plan, and member state before calling MAS. This adds no MAS client.
+Keep the Stage timer disabled until controlled Stage account tests verify actual locking, paid-account exclusion, existing-session access loss,
 and manual recovery through the Plan controls. Source changes alone do not establish this acceptance.
 The MAS admin listener has no externally reachable port; no MAS port is published, and Caddy does not route this private path. The S3-compatible endpoint `sss.telecrypt.io` is reachable only from authorized production and stage Linux VMs.
 

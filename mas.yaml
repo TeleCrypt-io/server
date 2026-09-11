@@ -30,12 +30,12 @@ http:
     - name: internal
       resources:
         - name: adminapi       # REST admin API; authorization remains enforced by MAS
-        - name: oauth          # Janitor's client-credentials token endpoint; no public route
+        - name: oauth          # Plan/Janitor client-credentials token endpoint; no public route
       binds:
-        # The admin API and Janitor's token endpoint are credential-gated by MAS. Docker networks
+        # The admin API and client-credentials token endpoint are credential-gated by MAS. Docker networks
         # are their only transport paths: there is no host publication and Caddy has no private
-        # route. Bind only to MAS's static address on mas_admin_net; that network remains Janitor's
-        # dedicated path.
+        # route. Bind only to MAS's static address on mas_admin_net; that network is shared only
+        # with Plan and Janitor.
         - address: '192.168.254.2:8081'
       proxy_protocol: false
 
@@ -77,7 +77,7 @@ account:
 email:
   transport: blackhole
 
-# Keep policy behavior in the committed base. The environment-bound Janitor admin client is added
+# Keep policy behavior in the committed base. The environment-bound Plan/Janitor admin client is added
 # by Harness's final runtime identity layer, not by the private secret overlay.
 policy:
   wasm_module: /usr/local/share/mas-cli/policy.wasm

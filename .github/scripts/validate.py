@@ -39,7 +39,7 @@ SERVICE_NETWORKS = {
     "mas": {"edge_mas_net", "synapse_mas_net", "mas_egress_net", "plan_mas_net", "mas_admin_net"},
     "registration": {"edge_registration_net", "registration_egress_net"},
     "janitor": {"mas_admin_net", "janitor_egress_net"},
-    "plan": {"edge_plan_net", "plan_mas_net", "plan_cashier_net"},
+    "plan": {"edge_plan_net", "plan_mas_net", "plan_cashier_net", "mas_admin_net"},
     "cashier": {"edge_cashier_net", "plan_cashier_net", "cashier_synapse_net", "cashier_egress_net"},
 }
 CADDY_INGRESS_NETWORK = "caddy_ingress_net"
@@ -65,7 +65,7 @@ JANITOR_ENV_KEYS = {
 }
 JANITOR_REQUIRED_ENV_KEYS = {"MAS_ADMIN_CLIENT_ID", "MAS_ADMIN_CLIENT_SECRET", "JANITOR_DB_URL"}
 JANITOR_OPTIONAL_ENV_KEYS = JANITOR_ENV_KEYS - JANITOR_REQUIRED_ENV_KEYS
-PLAN_ENV_KEYS = {"MAS_OIDC_CLIENT_ID", "MAS_OIDC_CLIENT_SECRET", "PLAN_SESSION_KEY", "PLAN_ASSERTION_PRIVATE_KEY"}
+PLAN_ENV_KEYS = {"MAS_ADMIN_CLIENT_ID", "MAS_ADMIN_CLIENT_SECRET", "MAS_OIDC_CLIENT_ID", "MAS_OIDC_CLIENT_SECRET", "PLAN_SESSION_KEY", "PLAN_ASSERTION_PRIVATE_KEY"}
 CASHIER_ENV_KEYS = {
     "SYNAPSE_ADMIN_TOKEN", "CASHIER_DB_URL", "DODO_API_KEY", "DODO_WEBHOOK_SECRET",
     "DODO_PRODUCT_ID", "PLAN_ASSERTION_PUBLIC_KEY",
@@ -411,8 +411,8 @@ def validate_mas_listeners(mas: str) -> None:
 
     This deployment uses the official IPv4 wildcard web socket and fixed IPv4 internal socket
     rather than Docker network self-aliases. Network attachment and resource selection provide the
-    reachability boundary instead; the private listener exposes only the admin API and Janitor's
-    OAuth token endpoint.
+    reachability boundary instead; the private listener exposes only the admin API and the
+    Plan/Janitor OAuth token endpoint.
     """
     listener_matches = list(re.finditer(
         r"(?ms)^    - name: (?P<name>[a-z][a-z0-9_-]*)\n(?P<body>.*?)(?=^    - name: |\n  trusted_proxies:)",
@@ -484,7 +484,8 @@ def validate_mas_admin_network(compose: str, sections: dict[str, str]) -> None:
         ),
         "MAS admin alias and static address",
     )
-    check(not service_network_options(sections["janitor"], "mas_admin_net").strip(), "Janitor static admin address")
+    for service in ("janitor", "plan"):
+        check(not service_network_options(sections[service], "mas_admin_net").strip(), (service, "static admin address"))
     for service, networks in SERVICE_NETWORKS.items():
         for network in networks:
             if service == "mas" and network == "mas_admin_net":
@@ -918,6 +919,7 @@ def validate_source(values: dict[str, str]) -> None:
         and "- name: health" not in mas
         and "mas_admin_net" in sections["mas"]
         and "mas_admin_net" in sections["janitor"]
+        and "mas_admin_net" in sections["plan"]
         and "mas_admin_net" not in sections["caddy"],
         "MAS private credential-gated admin boundary",
     )

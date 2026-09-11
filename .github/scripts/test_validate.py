@@ -226,7 +226,7 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             validate.validate_mas_listeners(alias_mutation)
 
-        internal_oauth = "        - name: oauth          # Janitor's client-credentials token endpoint; no public route\n"
+        internal_oauth = "        - name: oauth          # Plan/Janitor client-credentials token endpoint; no public route\n"
         with self.assertRaises(AssertionError):
             validate.validate_mas_listeners(mas.replace(internal_oauth, "", 1))
         with self.assertRaises(AssertionError):

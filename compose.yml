@@ -11,7 +11,7 @@
 #     `gw_priority: 1` is used only on the five non-internal egress attachments below and requires
 #     Docker Engine 28+ with Compose 2.33.1+.
 #   - MAS uses supported IPv4 socket-address binds for its separate web and private internal listeners;
-#     MAS and Janitor share a deterministic /29 private admin network for Janitor's operation, and
+#     MAS, Janitor, and Plan share a deterministic /29 private admin network for account locking, and
 #     no MAS port is published on the host. Every project network has an explicit, unique IPAM
 #     subnet so Docker's daemon-wide default address pool cannot overlap the host/VPN routes.
 #   - Media is stored in external S3; PostgreSQL is external to this Compose project.
@@ -140,7 +140,7 @@ services:
       mas_egress_net:
         gw_priority: 1
       plan_mas_net:
-      # Janitor's fixed endpoint name; this alias is name resolution only, not a MAS bind host.
+      # Fixed Plan/Janitor endpoint name; this alias is name resolution only, not a MAS bind host.
       mas_admin_net:
         aliases:
           - mas-admin
@@ -172,7 +172,7 @@ services:
       mas:
         condition: service_started
 
-  # ── janitor: the ONE component holding a standing MAS admin credential (lock stale
+  # ── janitor: shares the MAS admin credential with Plan (lock stale
   # unclaimed accounts + owner sign-up digest). Same image, different command. No listening
   # port, no Caddy route, zero inbound surface. The source derives the cashier-admin exclusion
   # from SERVER_NAME; this repository provides no scheduler, so the profile is invoked explicitly
@@ -183,7 +183,7 @@ services:
     # This one-shot is intentionally excluded from the default stack start. Harness starts the
     # profile only after Harness completes its OIDC discovery and Plan readiness checks.
     profiles: [janitor]
-    # mas_admin_net is Janitor's dedicated MAS application path; its database/SMTP egress is
+    # mas_admin_net provides the private MAS application path; database/SMTP egress is
     # isolated on its own external network.
     networks:
       mas_admin_net:
@@ -212,7 +212,8 @@ services:
         condition: service_healthy
 
   # ── plan: public browser boundary. It authenticates via MAS and signs narrowly-scoped requests
-  # to Cashier; it has no Dodo, Synapse-admin, or database credential. ─────────────────────────
+  # to Cashier. It shares the MAS admin credential with Janitor for team-owner lock/unlock;
+  # it has no Dodo, Synapse-admin, or database credential. ─────────────────────────
   plan:
     image: ${CONTROLPLANE_IMAGE:?set CONTROLPLANE_IMAGE}
     restart: unless-stopped
@@ -220,6 +221,7 @@ services:
       edge_plan_net:
       plan_mas_net:
       plan_cashier_net:
+      mas_admin_net:
     security_opt: ["no-new-privileges=true"]
     cap_drop: ["ALL"]
     read_only: true
@@ -228,6 +230,8 @@ services:
     environment:
       - SERVER_NAME=${SERVER_NAME:?set SERVER_NAME}
       - BILLING_ENVIRONMENT=${BILLING_ENVIRONMENT:?set BILLING_ENVIRONMENT}
+      - MAS_ADMIN_CLIENT_ID=${MAS_ADMIN_CLIENT_ID:?set MAS_ADMIN_CLIENT_ID}
+      - MAS_ADMIN_CLIENT_SECRET=${MAS_ADMIN_CLIENT_SECRET:?set MAS_ADMIN_CLIENT_SECRET}
       - MAS_OIDC_CLIENT_ID=${MAS_OIDC_CLIENT_ID:?set MAS_OIDC_CLIENT_ID}
       - MAS_OIDC_CLIENT_SECRET=${MAS_OIDC_CLIENT_SECRET:?set MAS_OIDC_CLIENT_SECRET}
       - PLAN_SESSION_KEY=${PLAN_SESSION_KEY:?set PLAN_SESSION_KEY}
