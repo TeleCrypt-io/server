@@ -174,7 +174,7 @@ services:
 
   # ── janitor: shares the MAS admin credential with Plan (lock stale
   # unclaimed accounts + owner sign-up digest). Same image, different command. No listening
-  # port, no Caddy route, zero inbound surface. The source derives the cashier-admin exclusion
+  # port, no Caddy route, zero inbound surface. The source derives the cashier exclusion
   # from SERVER_NAME; this repository provides no scheduler, so the profile is invoked explicitly
   # by the owner/Harness orchestration after readiness checks. ───────────────────────────────────
   janitor:
