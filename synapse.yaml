@@ -45,8 +45,8 @@ listeners:
 media_store_path: /staging/media
 enable_local_media_storage: false
 max_upload_size: 128M
-max_image_pixels: "32M"
 dynamic_thumbnails: false
+thumbnail_sizes: []
 url_preview_enabled: false
 
 # Federation fully disabled: empty whitelist = federate with nobody (blocks inbound and outbound).

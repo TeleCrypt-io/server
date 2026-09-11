@@ -860,6 +860,8 @@ def validate_source(values: dict[str, str]) -> None:
     check(
         "names: [client]" in synapse
         and "max_upload_size: 128M" in synapse
+        and "dynamic_thumbnails: false" in synapse
+        and "thumbnail_sizes: []" in synapse
         and "media_store_path: /staging/media" in synapse
         and "enable_local_media_storage: false" in synapse
         and "pid_file: /tmp/homeserver.pid" in synapse,

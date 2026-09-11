@@ -391,6 +391,8 @@ class ManifestTests(unittest.TestCase):
         self.assertIn("target: /secrets.json", compose)
         self.assertNotIn("database", synapse_document)
         self.assertNotIn("matrix_authentication_service", synapse_document)
+        self.assertEqual(synapse_document["dynamic_thumbnails"], False)
+        self.assertEqual(synapse_document["thumbnail_sizes"], [])
         self.assertIn("kind: synapse", mas)
         self.assertIn("endpoint: http://synapse:8008", mas)
         self.assertIn("transport: blackhole", mas)
