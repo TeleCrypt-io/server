@@ -1164,7 +1164,7 @@ def validate_image_platform(metadata: object, config_document: object) -> None:
     check(isinstance(config_document, dict) and config_document.get("os") == "linux" and config_document.get("architecture") == "amd64", "linux/amd64 config selection")
 
 
-def validate_synapse_provenance(inspect_labels: object, config_labels: object, version: str, expected_controlplane_version: str) -> None:
+def validate_synapse_provenance(inspect_labels: object, config_labels: object, version: str) -> None:
     expected = {"org.opencontainers.image.source": "https://github.com/TeleCrypt-io/telecrypt-synapse", "org.opencontainers.image.version": version, "org.opencontainers.image.base.name": "ghcr.io/element-hq/synapse"}
     for labels in (inspect_labels, config_labels):
         check(isinstance(labels, dict), "Synapse labels")
@@ -1173,7 +1173,8 @@ def validate_synapse_provenance(inspect_labels: object, config_labels: object, v
         for label, value in expected.items():
             check(labels.get(label) == value, (label, labels.get(label)))
         check(re.fullmatch(r"[0-9a-f]{40}", labels.get("org.opencontainers.image.revision", "")), "Synapse revision")
-        check(labels.get("org.telecrypt.controlplane.release") == expected_controlplane_version, "embedded Controlplane release")
+        # The Synapse release selects its embedded wheel independently of the Go services image.
+        check(re.fullmatch(IMAGE_RULES["CONTROLPLANE_IMAGE"][1], labels.get("org.telecrypt.controlplane.release", "")), "embedded Controlplane release")
         check(re.fullmatch(r"v?\d+\.\d+\.\d+", labels.get("org.opencontainers.image.base.version", "")), "Synapse base version")
         check(re.fullmatch(r"v?\d+\.\d+\.\d+", labels.get("org.telecrypt.s3-provider.version", "")), "S3 provider version")
         for label in ("org.telecrypt.controlplane.wheel.sha256", "org.telecrypt.s3-provider.fork.archive.sha256"):
@@ -1221,7 +1222,6 @@ def validate_published_images(directory: Path) -> None:
         labels,
         config.get("Labels"),
         values["SYNAPSE_IMAGE"].rsplit(":", 1)[1],
-        values["CONTROLPLANE_IMAGE"].rsplit(":", 1)[1],
     )
     print("Verified published image repositories, digests, config, and provenance labels")
 

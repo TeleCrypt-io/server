@@ -477,7 +477,7 @@ class ManifestTests(unittest.TestCase):
             "org.telecrypt.controlplane.wheel.sha256": "a" * 64,
             "org.telecrypt.s3-provider.fork.archive.sha256": "b" * 64,
         }
-        validate.validate_synapse_provenance(labels, dict(labels), "1.159-tc3", controlplane_version)
+        validate.validate_synapse_provenance(labels, dict(labels), "1.159-tc3")
         with self.assertRaises(AssertionError):
             validate.validate_image_platform(
                 {"Os": "linux", "Architecture": "arm64"},
@@ -486,10 +486,11 @@ class ManifestTests(unittest.TestCase):
         changed = dict(labels)
         changed["org.telecrypt.controlplane.release"] = "latest"
         with self.assertRaises(AssertionError):
-            validate.validate_synapse_provenance(labels, changed, "1.159-tc3", controlplane_version)
+            validate.validate_synapse_provenance(labels, changed, "1.159-tc3")
 
     def test_published_image_config_allows_omitted_null_fields_only(self) -> None:
         values = validate.load_manifest()
+        values["CONTROLPLANE_IMAGE"] = "ghcr.io/telecrypt-io/controlplane:0.5.18"
         digest = "sha256:" + "a" * 64
         synapse_labels = {
             "org.opencontainers.image.source": "https://github.com/TeleCrypt-io/telecrypt-synapse",
@@ -497,7 +498,7 @@ class ManifestTests(unittest.TestCase):
             "org.opencontainers.image.version": values["SYNAPSE_IMAGE"].rsplit(":", 1)[1],
             "org.opencontainers.image.base.name": "ghcr.io/element-hq/synapse",
             "org.opencontainers.image.base.version": "1.159.0",
-            "org.telecrypt.controlplane.release": values["CONTROLPLANE_IMAGE"].rsplit(":", 1)[1],
+            "org.telecrypt.controlplane.release": "0.5.17",
             "org.telecrypt.s3-provider.version": "1.7.0",
             "org.telecrypt.controlplane.wheel.sha256": "b" * 64,
             "org.telecrypt.s3-provider.fork.archive.sha256": "c" * 64,
@@ -537,7 +538,7 @@ class ManifestTests(unittest.TestCase):
                 (directory / f"{name}.config").write_text(json.dumps(config_document), encoding="utf-8")
                 (directory / f"{name}.metadata").write_text(json.dumps(metadata), encoding="utf-8")
 
-        with tempfile.TemporaryDirectory(delete=False, prefix="server-state-image-config-") as directory:
+        with mock.patch.object(validate, "load_manifest", return_value=values), tempfile.TemporaryDirectory(delete=False, prefix="server-state-image-config-") as directory:
             root = Path(directory)
             valid = root / "valid"
             valid.mkdir()
@@ -549,6 +550,11 @@ class ManifestTests(unittest.TestCase):
                 "wrong-required-command": lambda configs: configs["CADDY_IMAGE"].update(Cmd=["unexpected"]),
                 "missing-required-entrypoint": lambda configs: configs["MAS_IMAGE"].pop("Entrypoint"),
                 "wrong-required-entrypoint": lambda configs: configs["MAS_IMAGE"].update(Entrypoint=["unexpected"]),
+                "invalid-wheel-release": lambda configs: configs["SYNAPSE_IMAGE"].update(Labels={**synapse_labels, "org.telecrypt.controlplane.release": "latest"}),
+                "mismatched-wheel-release": lambda configs: configs["SYNAPSE_IMAGE"].update(Labels={**synapse_labels, "org.telecrypt.controlplane.release": "0.5.16"}),
+                "invalid-wheel-digest": lambda configs: configs["SYNAPSE_IMAGE"].update(Labels={**synapse_labels, "org.telecrypt.controlplane.wheel.sha256": "invalid"}),
+                "mismatched-wheel-digest": lambda configs: configs["SYNAPSE_IMAGE"].update(Labels={**synapse_labels, "org.telecrypt.controlplane.wheel.sha256": "d" * 64}),
+                "wrong-synapse-source": lambda configs: configs["SYNAPSE_IMAGE"].update(Labels={**synapse_labels, "org.opencontainers.image.source": "https://github.com/other/synapse"}),
             }
             for name, mutation in mutations.items():
                 with self.subTest(name=name):
