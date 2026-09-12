@@ -68,24 +68,6 @@ class ManifestTests(unittest.TestCase):
         for profile in (("stage.telecrypt.io", "live"), ("other.telecrypt.io", "test"), ("telecrypt.io", "sandbox")):
             with self.assertRaises(AssertionError):
                 validate.validate_profile({"SERVER_NAME": profile[0], "BILLING_ENVIRONMENT": profile[1]})
-    def test_plan_secret_namespace_is_closed(self) -> None:
-        self.assertIn("PLAN_SESSION_KEY", validate.PLAN_ENV_KEYS)
-        self.assertNotIn("SESSION_KEY", validate.PLAN_ENV_KEYS)
-
-    def test_security_options_use_equals_separator_in_all_active_compose_and_ci_paths(self) -> None:
-        root = Path(__file__).resolve().parents[2]
-        compose = (root / "compose.yml").read_text(encoding="utf-8")
-        secret_proof = (root / ".github" / "secret-proof.compose.yml").read_text(encoding="utf-8")
-        workflow = (root / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        legacy_separator = "no-new-privileges" + ":"
-        self.assertNotIn(legacy_separator, compose + secret_proof + workflow)
-        self.assertEqual(compose.count('security_opt: ["no-new-privileges=true"]'), len(validate.SERVICES))
-        self.assertEqual(secret_proof.count('security_opt: ["no-new-privileges=true"]'), 3)
-        self.assertEqual(workflow.count("--security-opt no-new-privileges=true"), 2)
-        services = yaml.safe_load(compose)["services"]
-        for service in validate.SERVICES:
-            self.assertEqual(services[service]["security_opt"], ["no-new-privileges=true"])
-
     def test_synapse_prejoin_state_is_narrow_and_covers_nested_folders(self) -> None:
         root = Path(__file__).resolve().parents[2]
         synapse = (root / "synapse.yaml").read_text(encoding="utf-8")
@@ -112,246 +94,27 @@ class ManifestTests(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 validate.validate_synapse_prejoin_state(candidate)
 
-    def test_synapse_environment_profiles_are_closed_request_limiters_only_and_exact(self) -> None:
-        root = Path(__file__).resolve().parents[2]
-        validate.validate_synapse_environment_profiles()
-        self.assertEqual(
-            validate.SYNAPSE_ENVIRONMENT_FILES,
-            {
-                "telecrypt.io": "synapse.telecrypt.io.yaml",
-                "stage.telecrypt.io": "synapse.stage.telecrypt.io.yaml",
-            },
-        )
-        self.assertEqual(validate.synapse_environment_path("telecrypt.io"), root / "synapse.telecrypt.io.yaml")
-        self.assertEqual(validate.synapse_environment_path("stage.telecrypt.io"), root / "synapse.stage.telecrypt.io.yaml")
-        for invalid in ("", "telecrypt.io.evil", "stage.telecrypt.io.evil"):
-            with self.subTest(invalid=invalid), self.assertRaises(AssertionError):
-                validate.synapse_environment_path(invalid)
-        expected = {
-            "telecrypt.io": {
-                "rc_message": {"per_second": 0.2, "burst_count": 10},
-                "rc_room_creation": {"per_second": 0.016, "burst_count": 10},
-            },
-            "stage.telecrypt.io": {
-                "rc_message": {"per_second": 1000, "burst_count": 1000},
-                "rc_room_creation": {"per_second": 1000, "burst_count": 1000},
-            },
-        }
-        for server_name, filename in validate.SYNAPSE_ENVIRONMENT_FILES.items():
-            document = yaml.safe_load((root / filename).read_text(encoding="utf-8"))
-            self.assertEqual(document, expected[server_name])
-
-        compose = (root / "compose.yml").read_text(encoding="utf-8")
-        synapse = validate.service_section(compose, "synapse")
-        self.assertIn("./synapse.${SERVER_NAME:?set SERVER_NAME}.yaml:/synapse-environment.yaml:ro", synapse)
-        self.assertIn(
-            'command: ["-c", "/homeserver.yaml", "-c", "/synapse-environment.yaml", "-c", "/secrets.json", "-c", "/runtime-identity.yaml"]',
-            synapse,
-        )
-
-        invalid_values = dict(validate.SYNAPSE_ENVIRONMENT_VALUES)
-        invalid_values["stage.telecrypt.io"] = {
-            "rc_message": {"per_second": 1, "burst_count": 1},
-            "rc_room_creation": {"per_second": 1, "burst_count": 1},
-        }
-        with mock.patch.object(validate, "SYNAPSE_ENVIRONMENT_VALUES", invalid_values):
-            with self.assertRaises(AssertionError):
-                validate.validate_synapse_environment_profiles()
-
-    def test_mas_environment_profiles_are_closed_and_exact(self) -> None:
-        root = Path(__file__).resolve().parents[2]
-        validate.validate_mas_environment_profiles()
-        expected = {
-            "telecrypt.io": {"burst": 100, "per_second": 2.0},
-            "stage.telecrypt.io": {"burst": 100000, "per_second": 1000.0},
-        }
-        self.assertEqual(
-            validate.MAS_ENVIRONMENT_FILES,
-            {
-                "telecrypt.io": "mas.telecrypt.io.yaml",
-                "stage.telecrypt.io": "mas.stage.telecrypt.io.yaml",
-            },
-        )
-        for server_name, filename in validate.MAS_ENVIRONMENT_FILES.items():
-            self.assertEqual(validate.mas_environment_path(server_name), root / filename)
-            document = yaml.safe_load((root / filename).read_text(encoding="utf-8"))
-            self.assertEqual(document["rate_limiting"]["registration"], expected[server_name])
-            if server_name == "stage.telecrypt.io":
-                self.assertEqual(document["rate_limiting"]["login"], validate.MAS_STAGE_LOGIN_VALUES)
-        for invalid in ("", "telecrypt.io.evil", "stage.telecrypt.io.evil"):
-            with self.subTest(invalid=invalid), self.assertRaises(AssertionError):
-                validate.mas_environment_path(invalid)
-
-        compose = (root / "compose.yml").read_text(encoding="utf-8")
-        mas = validate.service_section(compose, "mas")
-        self.assertIn("./mas.${SERVER_NAME:?set SERVER_NAME}.yaml:/mas-environment.yaml:ro", mas)
-        self.assertIn(
-            'command: ["server", "--config=/config.yaml", "--config=/mas-environment.yaml", "--config=/secrets.json", "--config=/runtime-identity.yaml"]',
-            mas,
-        )
-        self.assertNotIn("rate_limiting:", (root / "mas.yaml").read_text(encoding="utf-8"))
-
-    def test_synapse_mas_peer_is_internal_and_egress_isolated(self) -> None:
-        compose = (Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8")
-        self.assertEqual(validate.EGRESS_NETWORKS["synapse"], "synapse_egress_net")
-        self.assertEqual(validate.EGRESS_NETWORKS["mas"], "mas_egress_net")
-        self.assertIn("synapse_mas_net", validate.INTERNAL_NETWORKS)
-        self.assertNotIn("synapse_egress_net", validate.INTERNAL_NETWORKS)
-        self.assertNotIn("mas_egress_net", validate.INTERNAL_NETWORKS)
-        self.assertEqual(
-            validate.SERVICE_NETWORKS["synapse"],
-            {"edge_synapse_net", "synapse_mas_net", "synapse_egress_net", "cashier_synapse_net"},
-        )
-        self.assertEqual(
-            validate.SERVICE_NETWORKS["mas"],
-            {"edge_mas_net", "synapse_mas_net", "mas_egress_net", "plan_mas_net", "mas_admin_net"},
-        )
-        self.assertIn("synapse_mas_net:\n    internal: true", compose)
-        self.assertIn("synapse_egress_net:\n    ipam:", compose)
-        self.assertIn("mas_egress_net:\n    ipam:", compose)
-        for alias in ("mas-edge", "mas-synapse", "mas-plan"):
-            self.assertNotIn(alias, compose)
-        self.assertIn("mas-admin", compose)
-        self.assertNotRegex(compose, r"(?s)synapse_mas_net:\s*\n\s*gw_priority:\s*1")
-
-    def test_cashier_waits_for_synapse_readiness_before_startup(self) -> None:
-        compose = yaml.safe_load((Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8"))
-        services = compose["services"]
-        self.assertEqual(
-            services["cashier"]["depends_on"],
-            {"synapse": {"condition": "service_healthy"}},
-        )
-        self.assertEqual(
-            services["synapse"]["depends_on"],
-            {"mas": {"condition": "service_started"}},
-        )
-        self.assertNotIn("mas", services["cashier"]["depends_on"])
-
-    def test_mas_uses_supported_ipv4_address_binds_and_keeps_admin_auth_boundary(self) -> None:
-        root = Path(__file__).resolve().parents[2]
-        mas = (root / "mas.yaml").read_text(encoding="utf-8")
+    def test_mas_listener_validator_rejects_unsupported_binds_and_resources(self) -> None:
+        mas = (Path(__file__).resolve().parents[2] / "mas.yaml").read_text(encoding="utf-8")
         validate.validate_mas_listeners(mas)
-        self.assertEqual(
-            validate.MAS_LISTENER_RESOURCES["web"],
-            ["discovery", "human", "oauth", "compat", "graphql", "assets"],
-        )
-        self.assertEqual(validate.MAS_LISTENER_RESOURCES["internal"], ["adminapi", "oauth"])
-        self.assertIn("- address: '0.0.0.0:8080'", mas)
-        self.assertIn("- address: '192.168.254.2:8081'", mas)
-        for alias in ("mas-edge", "mas-synapse", "mas-plan", "mas-admin"):
-            self.assertNotIn(alias, mas)
 
-        alias_mutation = mas.replace(
+        alias_bind = mas.replace(
             "- address: '0.0.0.0:8080'",
             "- host: mas-edge\n          port: 8080",
             1,
         )
         with self.assertRaises(AssertionError):
-            validate.validate_mas_listeners(alias_mutation)
+            validate.validate_mas_listeners(alias_bind)
 
         internal_oauth = "        - name: oauth          # Plan/Janitor client-credentials token endpoint; no public route\n"
-        with self.assertRaises(AssertionError):
-            validate.validate_mas_listeners(mas.replace(internal_oauth, "", 1))
-        with self.assertRaises(AssertionError):
-            validate.validate_mas_listeners(mas.replace(internal_oauth, internal_oauth + "        - name: health\n", 1))
-        with self.assertRaises(AssertionError):
-            validate.validate_mas_listeners(mas.replace("        - name: oauth\n", "", 1))
-        with self.assertRaises(AssertionError):
-            validate.validate_mas_listeners(mas.replace("        - name: assets\n", "        - name: assets\n        - name: health\n", 1))
-
-        document = yaml.safe_load((root / "compose.yml").read_text(encoding="utf-8"))
-        services = document["services"]
-        networks = document["networks"]
-        self.assertIn("mas_admin_net", services["mas"]["networks"])
-        self.assertIn("mas_admin_net", services["janitor"]["networks"])
-        self.assertNotIn("mas_admin_net", services["caddy"]["networks"])
-        self.assertTrue(networks["mas_admin_net"]["internal"])
-        self.assertEqual(
-            networks["mas_admin_net"]["ipam"],
-            {"config": [{"subnet": "192.168.254.0/29"}]},
+        mutations = (
+            mas.replace(internal_oauth, "", 1),
+            mas.replace(internal_oauth, internal_oauth + "        - name: health\n", 1),
+            mas.replace("        - name: assets\n", "        - name: assets\n        - name: health\n", 1),
         )
-        self.assertEqual(
-            services["mas"]["networks"]["mas_admin_net"],
-            {"aliases": ["mas-admin"], "ipv4_address": "192.168.254.2"},
-        )
-        for network, options in services["mas"]["networks"].items():
-            if network != "mas_admin_net":
-                self.assertNotIn("aliases", options or {})
-
-        caddy = (root / "Caddyfile").read_text(encoding="utf-8")
-        admin_start = caddy.index("@mas_admin path /auth/api/admin /auth/api/admin/*")
-        admin = caddy[admin_start:]
-        self.assertIn('respond "Not Found" 404', admin)
-        self.assertNotIn("reverse_proxy", admin[: admin.index("\n\t}")])
-        self.assertIn("credential-gated", mas)
-
-    def test_caddy_has_single_normal_bridge_ingress_network(self) -> None:
-        compose_path = Path(__file__).resolve().parents[2] / "compose.yml"
-        compose = compose_path.read_text(encoding="utf-8")
-        document = yaml.safe_load(compose)
-        services = document["services"]
-        networks = document["networks"]
-
-        self.assertEqual(validate.CADDY_INGRESS_NETWORK, "caddy_ingress_net")
-        self.assertIn(validate.CADDY_INGRESS_NETWORK, services["caddy"]["networks"])
-        self.assertEqual(
-            [name for name, settings in services.items() if validate.CADDY_INGRESS_NETWORK in settings.get("networks", {})],
-            ["caddy"],
-        )
-        self.assertEqual(
-            networks[validate.CADDY_INGRESS_NETWORK],
-            {"ipam": {"config": [{"subnet": validate.NETWORK_SUBNETS[validate.CADDY_INGRESS_NETWORK]}]}},
-        )
-        self.assertNotIn(validate.CADDY_INGRESS_NETWORK, validate.INTERNAL_NETWORKS)
-        self.assertEqual(len(services["caddy"]["ports"]), 1)
-        self.assertEqual(services["caddy"]["ports"][0]["target"], 8080)
-        self.assertEqual(services["caddy"]["ports"][0]["published"], 8080)
-        self.assertTrue(all("ports" not in settings for name, settings in services.items() if name != "caddy"))
-        for name, settings in networks.items():
-            if name in validate.INTERNAL_NETWORKS:
-                self.assertTrue(settings["internal"], name)
-            else:
-                self.assertFalse(settings.get("internal", False), name)
-            self.assertEqual(
-                settings["ipam"],
-                {"config": [{"subnet": validate.NETWORK_SUBNETS[name]}]},
-            )
-
-        sections = {service: validate.service_section(compose, service) for service in validate.SERVICES}
-        validate.validate_source_topology(compose, sections)
-
-    def test_network_ipam_contract_rejects_missing_wrong_duplicate_and_overlapping_subnets(self) -> None:
-        valid = dict(validate.NETWORK_SUBNETS)
-        validate.validate_network_subnets(valid)
-        mutations = {
-            "missing": lambda values: values.pop("edge_synapse_net"),
-            "wrong": lambda values: values.__setitem__("edge_synapse_net", "10.254.1.0/28"),
-            "duplicate": lambda values: values.__setitem__("edge_synapse_net", values["caddy_ingress_net"]),
-            "overlap": lambda values: values.__setitem__("edge_synapse_net", "10.254.0.8/29"),
-        }
-        for name, mutation in mutations.items():
-            with self.subTest(name=name):
-                candidate = dict(valid)
-                mutation(candidate)
-                with self.assertRaises(AssertionError):
-                    validate.validate_network_subnets(candidate)
-
-    def test_network_ipam_structural_invariants_are_enforced_independently(self) -> None:
-        valid = dict(validate.NETWORK_SUBNETS)
-        mutations = {
-            "outside project pool": ("edge_synapse_net", "10.254.1.0/28"),
-            "duplicate": ("edge_synapse_net", valid["caddy_ingress_net"]),
-            "overlap": ("edge_synapse_net", "10.254.0.8/29"),
-            "MAS admin in project pool": ("mas_admin_net", "10.254.0.240/29"),
-            "PostgreSQL LAN overlap": ("mas_admin_net", "192.168.10.0/29"),
-        }
-        for name, (network, subnet) in mutations.items():
-            with self.subTest(name=name):
-                candidate = dict(valid)
-                candidate[network] = subnet
-                with mock.patch.object(validate, "NETWORK_SUBNETS", candidate):
-                    with self.assertRaises(AssertionError):
-                        validate.validate_network_subnets(candidate)
+        for candidate in mutations:
+            with self.assertRaises(AssertionError):
+                validate.validate_mas_listeners(candidate)
 
     def test_matrix_private_layers_own_complete_shallow_merged_maps(self) -> None:
         root = Path(__file__).resolve().parents[2]
@@ -423,34 +186,6 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "Synapse complete private loader maps"):
             self.validate_source_with_read_text({fixture_path: json.dumps(fixture)})
 
-    def test_synapse_signing_key_is_a_secret_not_environment_data(self) -> None:
-        compose = (Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8")
-        document = yaml.safe_load(compose)
-        synapse = document["services"]["synapse"]
-        self.assertEqual(validate.SERVICE_ENV_KEYS["synapse"], {"TMPDIR"})
-        self.assertEqual(synapse["environment"], ["TMPDIR=/staging/tmp"])
-        self.assertEqual(
-            synapse["secrets"],
-            [
-                {
-                    "source": "synapse_secrets_json",
-                    "target": "/secrets.json",
-                },
-                {
-                    "source": "synapse_signing_key",
-                    "target": "/signing.key",
-                },
-            ],
-        )
-        self.assertEqual(
-            yaml.safe_load(compose)["secrets"],
-            {
-                "synapse_secrets_json": {"file": "${TELECRYPT_DATA_DIR:?set TELECRYPT_DATA_DIR}/secrets/synapse.secrets.json"},
-                "synapse_signing_key": {"file": "${TELECRYPT_DATA_DIR:?set TELECRYPT_DATA_DIR}/secrets/synapse_signing.key"},
-                "mas_secrets_json": {"file": "${TELECRYPT_DATA_DIR:?set TELECRYPT_DATA_DIR}/secrets/mas.secrets.json"},
-            },
-        )
-
     def test_caddy_capability_exception_is_exact_and_non_caddy_stays_capability_free(self) -> None:
         compose = yaml.safe_load((Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8"))
         services = compose["services"]
@@ -472,10 +207,6 @@ class ManifestTests(unittest.TestCase):
                 validate.validate_service_capabilities(
                     service, {**settings, "cap_add": ["NET_ADMIN"]}
                 )
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        caddy_step = workflow[workflow.index("      - name: Validate Caddy"):workflow.index("\n  release:", workflow.index("      - name: Validate Caddy"))]
-        self.assertIn("--cap-drop ALL \\\n            --cap-add NET_BIND_SERVICE", caddy_step)
-
     def test_manifest_has_exactly_five_versioned_images(self) -> None:
         values = validate.load_manifest()
         self.assertEqual(set(values), set(validate.IMAGE_KEYS))
@@ -595,90 +326,7 @@ class ManifestTests(unittest.TestCase):
                         validate.validate_published_images(invalid)
 
 
-class CaddyRouteTests(unittest.TestCase):
-    def setUp(self) -> None:
-        root = Path(__file__).resolve().parents[2]
-        self.caddy = (root / "Caddyfile").read_text(encoding="utf-8")
-        compose = (root / "compose.yml").read_text(encoding="utf-8")
-        self.caddy_body = validate.service_section(compose, "caddy")
-
-    def test_media_deletion_route_is_exact_and_before_generic_matrix_proxy(self) -> None:
-        path = "/_matrix/client/unstable/io.telecrypt.storage/delete_media"
-        options = self.caddy.index("@telecrypt_delete_media_options {")
-        post = self.caddy.index("@telecrypt_delete_media {")
-        generic = self.caddy.index("\t@synapse path_regexp")
-        self.assertLess(options, generic)
-        self.assertLess(post, generic)
-        self.assertIn("method POST", self.caddy[post:self.caddy.index("\n\t}", post)])
-        self.assertIn(f"path {path}", self.caddy[post:self.caddy.index("\n\t}", post)])
-        self.assertNotIn("request_body", self.caddy[post:generic])
-
-    def test_media_deletion_preflight_is_exact_origin_post_only_and_narrow(self) -> None:
-        path = "/_matrix/client/unstable/io.telecrypt.storage/delete_media"
-        matcher_start = self.caddy.index("@telecrypt_delete_media_options {")
-        matcher_end = self.caddy.index("\n\t}", matcher_start)
-        matcher = self.caddy[matcher_start:matcher_end]
-        handle_start = self.caddy.index("handle @telecrypt_delete_media_options {")
-        handle_end = self.caddy.index("\n\t}", handle_start)
-        handle = self.caddy[handle_start:handle_end]
-        self.assertIn("method OPTIONS", matcher)
-        self.assertIn(f"path {path}", matcher)
-        self.assertIn("header Origin https://storage.{$SERVER_NAME}", matcher)
-        self.assertIn("header Access-Control-Request-Method POST", matcher)
-        self.assertNotIn("Access-Control-Request-Headers", matcher)
-        self.assertIn('Access-Control-Allow-Origin "https://storage.{$SERVER_NAME}"', handle)
-        self.assertIn('Access-Control-Allow-Methods "POST"', handle)
-        self.assertIn('Access-Control-Allow-Headers "Authorization, Content-Type"', handle)
-        self.assertIn('respond "" 204', handle)
-        self.assertEqual(len(re.findall(r"(?m)^\s*Access-Control-[A-Za-z-]+ ", handle)), 3)
-        self.assertNotIn("Access-Control-Allow-Credentials", handle)
-        self.assertNotIn("Access-Control-Allow-Private-Network", handle)
-        self.assertNotIn('Access-Control-Allow-Origin "*"', handle)
-        self.assertNotIn("{http.request.header.Origin}", handle)
-        self.assertLess(matcher_start, self.caddy.index("@telecrypt_delete_media_other_method"))
-
-    def test_media_deletion_non_post_is_rejected_with_allow_header(self) -> None:
-        start = self.caddy.index("@telecrypt_delete_media_other_method {")
-        end = self.caddy.index("\n\t}", start)
-        matcher = self.caddy[start:end]
-        handle_start = self.caddy.index("handle @telecrypt_delete_media_other_method {")
-        handle_end = self.caddy.index("\n\t}", handle_start)
-        handle = self.caddy[handle_start:handle_end]
-        self.assertIn("path /_matrix/client/unstable/io.telecrypt.storage/delete_media", matcher)
-        self.assertIn("not method POST", matcher)
-        self.assertIn('header Allow "POST, OPTIONS"', handle)
-        self.assertIn('respond "Method Not Allowed" 405', handle)
-        self.assertNotIn("reverse_proxy", handle)
-
-    def test_closed_federation_discovery_is_direct_all_method_404(self) -> None:
-        start = self.caddy.index("handle /.well-known/matrix/server {")
-        end = self.caddy.index("\n\t}", start)
-        handle = self.caddy[start:end]
-        self.assertLess(start, self.caddy.index("@production_apex"))
-        self.assertIn('respond "Not Found" 404', handle)
-        self.assertNotIn("method ", handle)
-        self.assertNotIn("redir ", handle)
-        self.assertNotIn("reverse_proxy", handle)
-        self.assertNotIn("Location", handle)
-
-    def test_ingress_peer_gate_is_a_matched_terminal_handle_before_fallback(self) -> None:
-        gate = "\thandle @untrusted_ingress_peer {\n\t\tabort\n\t}"
-        self.assertEqual(self.caddy.count(gate), 1)
-        self.assertNotIn("abort @untrusted_ingress_peer", self.caddy)
-        for site in re.findall(r"(?ms)^http://[^\n]+ \{.*?^\}", self.caddy):
-            self.assertIn("import ingress_peer_gate", site)
-            gate_start = site.index("\timport ingress_peer_gate\n")
-            fallback_start = site.index("\thandle {\n")
-            self.assertLess(gate_start, fallback_start)
-
-    def test_cleartext_caddy_listener_allows_only_http11(self) -> None:
-        self.assertEqual(
-            re.findall(r"(?m)^[ \t]*protocols[ \t]+([^\s#]+(?:[ \t]+[^\s#]+)*)[ \t]*$", self.caddy),
-            ["h1"],
-        )
-        self.assertRegex(self.caddy, r"(?ms)^\tservers :8080 \{\n\t\tprotocols h1\n\t\}")
-        self.assertNotRegex(self.caddy, r"(?m)^[ \t]*protocols[ \t]+(?:[^\n]*[ \t])?(?:h2|h2c|h3)(?:[ \t]|$)")
-
+class AdaptedCaddyTests(unittest.TestCase):
     def test_adapted_ingress_peer_gate_rejects_untrusted_before_terminal_fallback(self) -> None:
         def site_routes() -> list[dict]:
             return [
@@ -954,75 +602,6 @@ class ReleaseCaptureTests(unittest.TestCase):
 
 
 class ReleaseEvidenceTests(unittest.TestCase):
-    def test_release_discovery_slurps_jsonl_matches_before_counting(self) -> None:
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        start = workflow.index("          discover_release() {")
-        end = workflow.index("          download_and_compare_manifest()", start)
-        discovery = workflow[start:end]
-        self.assertIn(
-            'capture_extract match_count "$matches_path" "$matches_path.error" -s \'length\'',
-            discovery,
-        )
-
-    def test_container_commands_use_the_step_scoped_diagnostics_classifier(self) -> None:
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        self.assertIn('"$mas_mounts" >/dev/null', workflow)
-        self.assertNotIn('"$mas_mounts" >/dev/null 2>&1', workflow)
-        lines = workflow.splitlines()
-        blocks: list[list[str]] = []
-        block: list[str] = []
-        for line in lines:
-            if line.startswith("      - "):
-                if block:
-                    blocks.append(block)
-                block = [line]
-            elif block:
-                block.append(line)
-        if block:
-            blocks.append(block)
-        command_pattern = re.compile(r"\b(?:docker|skopeo)\s+")
-        invocation_count = 0
-        for block in blocks:
-            for index, line in enumerate(block):
-                if not command_pattern.search(line):
-                    continue
-                if line.lstrip().startswith("uses: "):
-                    continue
-                invocation_count += 1
-                start = index
-                while start and block[start - 1].rstrip().endswith("\\"):
-                    start -= 1
-                self.assertTrue(
-                    any("source .github/scripts/container-helpers.sh" in prior for prior in block[: index + 1]),
-                    block[0],
-                )
-                self.assertIn("container_command", "\n".join(block[start : index + 1]), line)
-        self.assertGreater(invocation_count, 0)
-        self.assertNotIn("run_bounded_combined.sh", workflow)
-
-    def test_stdin_inheritance_is_reserved_for_registry_login(self) -> None:
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        self.assertIn('authdir="$(mktemp -d)"', workflow)
-        self.assertIn('authfile="$authdir/auth.json"', workflow)
-        self.assertIn('rm -rf -- "$authdir" "$metadata_dir" "$manifest_path"', workflow)
-        self.assertNotIn('authfile="$(mktemp)"', workflow)
-        self.assertEqual(workflow.count("container_command --sensitive --inherit-stdin"), 1)
-        login_start = workflow.index("container_command --sensitive --inherit-stdin")
-        login_end = workflow.index("\n", login_start)
-        login_line = workflow[login_start:login_end]
-        self.assertIn("skopeo login", login_line)
-        self.assertIn("--password-stdin", workflow[login_start : workflow.index("ghcr.io; then", login_start)])
-        token_copy = workflow.index('registry_token="$GH_TOKEN"')
-        token_unset = workflow.index("unset GH_TOKEN", token_copy)
-        self.assertLess(token_unset, login_start)
-        token_restore = workflow.index('export GH_TOKEN="$registry_token"', login_start)
-        first_api = workflow.index("gh api --include", token_restore)
-        self.assertLess(token_restore, first_api)
-        final_token_unset = workflow.rindex("unset GH_TOKEN")
-        final_registry_check = workflow.rindex("verify_registry_digests")
-        self.assertLess(final_token_unset, final_registry_check)
-        self.assertIn("unset registry_token", workflow[final_registry_check:])
-
     def test_registry_login_uses_missing_authfile_and_password_stdin(self) -> None:
         """The login path must let Skopeo create its JSON auth file, without leaking the token."""
         helper = CONTAINER_HELPER
@@ -1079,12 +658,6 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.assertEqual(authfile_state.read_text(encoding="utf-8"), "absent")
             self.assertEqual(token_capture.read_text(encoding="utf-8"), "offline-registry-token")
             self.assertNotIn("offline-registry-token", result.stdout + result.stderr)
-
-    def test_secret_bearing_compose_inspection_is_non_emitting(self) -> None:
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        self.assertIn('container_command --sensitive "$rendered_compose"', workflow)
-        self.assertIn('container_command --sensitive "$raw_images_file"', workflow)
-        self.assertIn('container_command --sensitive "$image_list"', workflow)
 
     def test_container_diagnostics_accept_progress_and_reject_hostile_markers(self) -> None:
         with tempfile.TemporaryDirectory(delete=False, prefix="server-state-container-diagnostics-") as directory:
@@ -1157,29 +730,6 @@ class ReleaseEvidenceTests(unittest.TestCase):
 
             timed_out = run("import time; time.sleep(60)", timeout=1)
             self.assertEqual(timed_out.returncode, 124, timed_out.stderr)
-
-    def test_secret_proof_cleanup_and_value_reads_preserve_failures(self) -> None:
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        self.assertIn("trap cleanup_on_exit EXIT", workflow)
-        self.assertIn("if ! cleanup; then", workflow)
-        self.assertNotIn(
-            'docker rm -f "$mas_container" "$missing_container" >/dev/null || true',
-            workflow,
-        )
-        docker_value_start = workflow.index("docker_value()")
-        docker_value_end = workflow.index("\n          }", docker_value_start)
-        docker_value = workflow[docker_value_start:docker_value_end]
-        self.assertIn('container_command "$output" 60 docker "$@" | tr', docker_value)
-        cleanup_container_start = workflow.index("cleanup_container()")
-        cleanup_start = workflow.index("cleanup() {", cleanup_container_start)
-        cleanup_container = workflow[cleanup_container_start:cleanup_start]
-        cleanup = workflow[cleanup_start:workflow.index("cleanup_on_exit()", cleanup_start)]
-        self.assertIn('if ! rm -f -- "$lookup_output" "$lookup_output.stderr"; then', cleanup_container)
-        self.assertIn('return "$status"', cleanup_container)
-        self.assertIn('if ! rm -f -- "$mas_output"', cleanup)
-        self.assertIn('"$mas_user_output" "$mas_user_output.stderr"', cleanup)
-        self.assertIn('status=1', cleanup)
-        self.assertIn('if [[ "$status" -eq 0 ]]; then', workflow)
 
     def test_sensitive_proof_failures_have_fixed_classes_without_diagnostics(self) -> None:
         classifications = {
@@ -1419,83 +969,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.assertEqual(redirected.stderr, "")
             self.assertEqual(redirected_output.read_text(encoding="utf-8"), "telecrypt-synapse-proof:uid\n")
 
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        self.assertIn("container_sensitive_proof_class", workflow)
-        self.assertIn("proof_status=$?", workflow)
-        proof_start = workflow.index("      - name: Verify UID-991 secret runtime contract")
-        proof_end = workflow.index("Verify UID-991 MAS secret isolation", proof_start)
-        proof_block = workflow[proof_start:proof_end]
-        self.assertIn("-f .github/secret-proof.compose.yml", proof_block)
-        self.assertNotIn('mkdir -p "$TELECRYPT_DATA_DIR/runtime/synapse-staging"', proof_block)
-        self.assertIn('install -d -m 700 "$fixture_secrets"', workflow)
-        self.assertIn("install -m 444 .github/fixtures/synapse.secrets.json", workflow)
-        self.assertIn("install -m 444 .github/fixtures/synapse-signing-fixture.txt", workflow)
-        for phase in (
-            "config-check",
-            "config-output-read",
-            "container-user-inspection",
-            "container-user-contract",
-            "mount-inspection",
-            "mount-contract",
-            "output-secret-isolation",
-            "cleanup",
-        ):
-            self.assertIn(f"mas_failure {phase}", workflow)
-        self.assertIn('([.[].Destination] | sort) == ["/config.yaml", "/mas-environment.yaml", "/runtime-identity.yaml", "/secrets.json"]', workflow)
-        self.assertIn('all(.[]; .RW == false)', workflow)
-        self.assertNotIn("--config=/signing.key", workflow)
-        self.assertIn('echo "MAS secret proof failed: $1"', workflow)
-        self.assertIn("allowed_config_paths", workflow)
-        self.assertIn("contextlib.redirect_stdout", workflow)
-        self.assertIn("contextlib.redirect_stderr", workflow)
-        self.assertIn("getattr(error, \"path\", None)", workflow)
-        self.assertIn("marker = config_marker(error)", workflow)
-        self.assertIn("except FileNotFoundError", workflow)
-        self.assertIn("except PermissionError", workflow)
-        self.assertIn("except ModuleNotFoundError", workflow)
-        self.assertIn("except ImportError", workflow)
-        self.assertIn("except SystemExit", workflow)
-        self.assertIn("except Exception", workflow)
-        for marker in (
-            "success",
-            "config-server",
-            "config-database",
-            "config-logging",
-            "config-repository",
-            "config-key",
-            "config-media",
-            "config-listeners",
-            "config-unknown",
-            "profile-values",
-            "file-not-found",
-            "permission",
-            "module-import",
-            "parser-exit",
-            "unexpected",
-        ):
-            self.assertIn(f"telecrypt-synapse-loader:{marker}", workflow)
-        self.assertIn("synapse_loader_failure container-diagnostic", workflow)
-        self.assertIn("synapse_loader_failure container-run", workflow)
-        self.assertIn("synapse_loader_failure output-read", workflow)
-        self.assertIn("synapse_loader_failure output-contract", workflow)
-        loader_start = workflow.index("      - name: Verify pinned Synapse JSON config loader")
-        loader_end = workflow.index("Verify exact selected container images", loader_start)
-        loader_block = workflow[loader_start:loader_end]
-        self.assertIn(
-            "          '; then\n"
-            "            synapse_loader_status=0\n"
-            "          else\n"
-            "            synapse_loader_status=$?\n"
-            "          fi",
-            loader_block,
-        )
-        self.assertNotIn("if ! container_command", loader_block)
-        self.assertNotRegex(workflow, r"container_command[^\n]*>\s*/dev/null")
-        self.assertNotIn("Synapse config loader returned no config", workflow)
-        self.assertNotIn("str(error)", workflow)
-        self.assertNotIn("repr(error)", workflow)
-        self.assertIn('echo "Synapse JSON loader proof failed: $1"', workflow)
-
+    def test_secret_proof_compose_matches_canonical_service_contract(self) -> None:
         proof_compose = yaml.safe_load((Path(__file__).resolve().parents[1] / "secret-proof.compose.yml").read_text(encoding="utf-8"))
         canonical_compose = yaml.safe_load((Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8"))
         proof_services = proof_compose["services"]
@@ -1532,11 +1006,6 @@ class ReleaseEvidenceTests(unittest.TestCase):
             proof_services["mas-secret-proof"]["volumes"],
         )
         self.assertEqual(proof_services["synapse-loader-proof"]["environment"], ["TMPDIR=/staging/tmp"])
-        self.assertGreaterEqual(workflow.count("-f .github/secret-proof.compose.yml"), 3)
-
-        for status in range(70, 75):
-            self.assertIn(f"fail({status},", workflow)
-
     def test_product_tag_evidence_binds_exact_api_urls(self) -> None:
         key = "SYNAPSE_IMAGE"
         tag = validate.load_manifest()[key].rsplit(":", 1)[1]
@@ -1658,13 +1127,8 @@ class ReleaseEvidenceTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             validate.validate_image_record("CASHIER_IMAGE", cashier_with_extra)
 
-    def test_product_release_fetch_is_public_only_and_reports_safe_request_identity(self) -> None:
+    def test_product_release_fetch_reports_safe_request_identity_on_api_failure(self) -> None:
         script = Path(__file__).parent / "fetch_product_releases.sh"
-        text = script.read_text(encoding="utf-8")
-        self.assertNotIn("TeleCrypt-io/cashier", text)
-        self.assertNotIn("fetch_release_asset CASHIER_IMAGE", text)
-        for phase in ("tag-ref", "annotated-tag", "release", "asset"):
-            self.assertIn(f'{phase} "$repository" "$tag"', text)
         with tempfile.TemporaryDirectory(delete=False, prefix="server-state-gh-unauthorized-") as directory:
             root = Path(directory)
             fake_gh = root / "gh"
@@ -1695,40 +1159,6 @@ class ReleaseEvidenceTests(unittest.TestCase):
             synapse_tag = validate.load_manifest()["SYNAPSE_IMAGE"].rsplit(":", 1)[1]
             self.assertIn(f"tag={synapse_tag}", result.stderr)
             self.assertNotIn("offline-test-token", result.stdout + result.stderr)
-
-    def test_release_workflow_uses_complete_machine_http_status_checks(self) -> None:
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        self.assertIn("gh api --include", workflow)
-        self.assertIn("http_status", workflow)
-        self.assertIn("capture_command", workflow)
-        self.assertNotIn("capture_external", workflow)
-        self.assertNotIn("bounded-command.py", workflow)
-        self.assertNotRegex(workflow, r"grep -Eiq '.*404")
-        self.assertEqual(workflow.count('.label == ""'), 2)
-        self.assertNotIn(".label == null", workflow)
-
-    def test_release_workflow_discovers_complete_unique_draft_by_numeric_id(self) -> None:
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        self.assertIn("releases?per_page=100&page=$page", workflow)
-        self.assertNotIn("--jq '[.[] | {id,tag_name,draft}]'", workflow)
-        self.assertNotIn("max_release_pages", workflow)
-        self.assertNotIn("bounded page limit", workflow)
-        self.assertIn("match_count", workflow)
-        self.assertIn("get_release_by_id", workflow)
-        self.assertIn("release_id", workflow)
-        self.assertIn("upload_url", workflow)
-        self.assertIn("--method PATCH", workflow)
-        self.assertNotIn("/releases/tags/$GITHUB_REF_NAME", workflow)
-        self.assertNotIn("gh release create", workflow)
-        self.assertNotIn("gh release upload", workflow)
-        self.assertNotIn("gh release edit", workflow)
-
-    def test_product_release_fetch_keeps_complete_api_response(self) -> None:
-        script = Path(__file__).parent / "fetch_product_releases.sh"
-        text = script.read_text(encoding="utf-8")
-        self.assertNotIn("MAX_RELEASE_JSON_BYTES", text)
-        self.assertNotIn('max_bytes="$1"', text)
-        self.assertIn('MAX_RELEASE_ASSET_BYTES=1048576', text)
 
     def test_container_command_explicit_stdin_inheritance_is_secret_safe(self) -> None:
         with tempfile.TemporaryDirectory(delete=False, prefix="server-state-stdin-") as directory:

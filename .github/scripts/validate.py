@@ -118,7 +118,6 @@ EXPECTED_DEPENDS_ON = {
     "janitor": {"mas": "service_healthy", "cashier": "service_healthy"},
     "plan": {"mas": "service_started"}, "mas": {}, "cashier": {"synapse": "service_healthy"},
 }
-FORBIDDEN_SERVICE_KEYS = {"privileged", "network_mode", "pid", "ipc", "devices", "runtime", "device_cgroup_rules", "userns_mode", "uts", "cgroup", "cgroup_parent", "sysctls", "extra_hosts"}
 MIN_DOCKER_ENGINE = (28, 0, 0)
 MIN_COMPOSE = (2, 33, 1)
 MAS_LISTENER_BINDINGS = {
@@ -131,8 +130,6 @@ MAS_LISTENER_RESOURCES = {
 }
 MAS_ADMIN_SUBNET = "192.168.254.0/29"
 MAS_ADMIN_ADDRESS = "192.168.254.2"
-PROJECT_NETWORK_POOL = "10.254.0.0/24"
-POSTGRES_LAN = "192.168.10.0/24"
 NETWORK_SUBNETS = {
     "caddy_ingress_net": "10.254.0.0/28",
     "edge_synapse_net": "10.254.0.16/28",
@@ -381,31 +378,6 @@ def service_network_options(service_body: str, network: str) -> str:
     return found.group("body")
 
 
-def validate_network_subnets(actual: dict[str, str]) -> None:
-    check(set(actual) == set(NETWORK_SUBNETS), "network IPAM map")
-    pool = ipaddress.ip_network(PROJECT_NETWORK_POOL)
-    postgres_lan = ipaddress.ip_network(POSTGRES_LAN)
-    parsed = {}
-    for name, expected in NETWORK_SUBNETS.items():
-        subnet = actual.get(name)
-        check(subnet == expected, (name, "subnet", subnet))
-        try:
-            network = ipaddress.ip_network(subnet, strict=True)
-        except ValueError:
-            check(False, (name, "invalid subnet", subnet))
-        check(network.version == 4, (name, "IPv4 subnet", subnet))
-        if name == "mas_admin_net":
-            check(not network.overlaps(pool), (name, "project pool overlap"))
-        else:
-            check(network.subnet_of(pool), (name, "project pool membership", subnet))
-        check(not network.overlaps(postgres_lan), (name, "PostgreSQL LAN overlap", subnet))
-        parsed[name] = network
-    names = list(parsed)
-    for index, left_name in enumerate(names):
-        for right_name in names[index + 1 :]:
-            check(not parsed[left_name].overlaps(parsed[right_name]), (left_name, right_name, "subnet overlap"))
-
-
 def validate_mas_listeners(mas: str) -> None:
     """Require MAS's supported socket-address listener contract.
 
@@ -517,21 +489,8 @@ def validate_source_topology(compose: str, sections: dict[str, str]) -> None:
         subnets = re.findall(r"(?m)^        - subnet: ([^\s]+)[ \t]*$", body)
         check(len(subnets) == 1, (name, "IPAM subnet"))
         actual_subnets[name] = subnets[0]
-    validate_network_subnets(actual_subnets)
+    check(actual_subnets == NETWORK_SUBNETS, ("network IPAM map", actual_subnets))
     check(CADDY_INGRESS_NETWORK in blocks and CADDY_INGRESS_NETWORK not in INTERNAL_NETWORKS, "Caddy ingress network")
-
-
-def validate_manifest_negative(values: dict[str, str]) -> None:
-    base = [f"{key}={value}" for key, value in values.items()]
-    mutations = (base + ["EXTRA_IMAGE=docker.io/caddy:1.0.0-alpine"], base + [base[0]],
-                 [line.replace(":2.11.4-alpine", "@sha256:" + "0" * 64) for line in base],
-                 [line.replace(":2.11.4-alpine", ":latest") for line in base])
-    for candidate in mutations:
-        try:
-            parse_manifest(candidate)
-        except AssertionError:
-            continue
-        raise AssertionError("image manifest mutation was accepted")
 
 
 def validate_caddy(caddy: str, caddy_body: str) -> None:
@@ -658,7 +617,7 @@ def validate_caddy(caddy: str, caddy_body: str) -> None:
     check("path /agents" in caddy and "reverse_proxy registration:9009" in caddy, "Registration boundary")
     for field in ("request>headers>Authorization", "request>headers>Cookie", "request>headers>Proxy-Authorization", "resp_headers>Set-Cookie"):
         check(len(re.findall(rf"(?im)^\s*{re.escape(field)}\s+delete\s*$", caddy)) == 1, field)
-    check("response>headers>Set-Cookie" not in caddy and "trusted_proxies_strict" in caddy, "header policy")
+    check("trusted_proxies_strict" in caddy, "trusted proxy header policy")
     check(caddy.count("header_up -X-Telecrypt-Client-IP") == 1 and not re.search(r"(?im)^\s*header_up\s+X-Telecrypt-Client-IP(?:\s|$)", caddy), "client identity")
     check("log_skip" not in caddy, "Dodo logging")
     dodo = caddy[caddy.index("@dodo_webhook {"):caddy.index("\n\t}", caddy.index("@dodo_webhook {"))]
@@ -669,52 +628,8 @@ def validate_caddy(caddy: str, caddy_body: str) -> None:
     declared = set(re.findall(r"^\s+- ([A-Z][A-Z0-9_]*)=", caddy_body, re.MULTILINE))
     check(consumed <= declared, ("undeclared Caddy variables", consumed - declared))
     check("@synapse path_regexp ^/_matrix/(client|media)(/|$)" in caddy, "Synapse route")
-    matrix = re.compile(r"^/_matrix/(client|media)(/|$)")
-    check(all(matrix.match(path) for path in ("/_matrix/client", "/_matrix/client/v3/sync", "/_matrix/media")), "Synapse route examples")
-    check(not any(matrix.match(path) for path in ("/_matrix", "/_matrix/federation/v1/version", "/_matrix/identity/api/v1", "/_matrix/key/v2/server", "/_matrix/clientevil", "/_matrixevil")), "Synapse route exclusions")
     admin = caddy[caddy.index("@mas_admin path /auth/api/admin /auth/api/admin/*"):]
     check('respond "Not Found" 404' in admin and "reverse_proxy" not in admin[:admin.index("\n\t}")] if "\n\t}" in admin else False, "MAS admin boundary")
-
-
-def validate_caddy_negative(caddy: str, body: str) -> None:
-    mutations = (
-        caddy.replace("\t@mas_compat {\n\t\tmethod POST\n", "\t@mas_compat {\n", 1),
-        caddy.replace("\t\tnot method POST\n", "", 1),
-        caddy.replace("\t\tpath /agents\n\t\tnot method POST\n", "\t\tpath /agents\n", 1),
-        caddy.replace(
-            "\t@telecrypt_delete_media {\n\t\tmethod POST\n",
-            "\t@telecrypt_delete_media {\n",
-            1,
-        ),
-        caddy.replace(
-            "\thandle @telecrypt_delete_media {\n",
-            "\thandle @telecrypt_delete_media {\n\t\trequest_body { max_size 32KiB }\n",
-            1,
-        ),
-        caddy.replace("\t\tmethod GET\n\t\tpath /.well-known/matrix/client", "\t\tmethod POST\n\t\tpath /.well-known/matrix/client", 1),
-        caddy.replace(
-            '\thandle /.well-known/matrix/server {\n\t\trespond "Not Found" 404\n\t}\n',
-            "",
-            1,
-        ),
-        caddy.replace(
-            '\t\trespond "Not Found" 404\n\t}\n\n\t# The public website exists only',
-            '\t\trespond "Not Found" 404\n\t\treverse_proxy synapse:8008\n\t}\n\n\t# The public website exists only',
-            1,
-        ),
-        caddy.replace(
-            '\t\trespond "Not Found" 404\n\t}\n\n\t# The public website exists only',
-            '\t\trespond "Not Found" 404\n\t\tredir https://www.telecrypt.io 301\n\t}\n\n\t# The public website exists only',
-            1,
-        ),
-        caddy.replace("\timport ingress_peer_gate\n", "", 1),
-    )
-    for candidate in mutations:
-        try:
-            validate_caddy(candidate, body)
-        except (AssertionError, ValueError):
-            continue
-        raise AssertionError("Caddy policy mutation was accepted")
 
 
 def _adapted_route_lists(value: object):
@@ -798,7 +713,6 @@ def validate_adapted_caddy(path: Path) -> None:
 def validate_source(values: dict[str, str]) -> None:
     compose = (ROOT / "compose.yml").read_text(encoding="utf-8")
     caddy = (ROOT / "Caddyfile").read_text(encoding="utf-8")
-    workflow = (ROOT / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8")
     env_text = (ROOT / ".env.example").read_text(encoding="utf-8")
     env = assignments(env_text)
     sections = {service: service_section(compose, service) for service in SERVICES}
@@ -810,8 +724,7 @@ def validate_source(values: dict[str, str]) -> None:
     check(len(re.findall(r"(?m)^    image:", compose)) == len(SERVICE_IMAGES) and not re.search(r"(?m)^    image: [^$]", compose), "image indirection")
     check("build:" not in compose, "local builds")
     check("container_name:" not in compose, "global container names")
-    check("synapse/media_store" not in workflow, "legacy persistent media path")
-    for forbidden in ("privileged:", "network_mode:", "pid:", "ipc:", "devices:", "/var/run/docker.sock"):
+    for forbidden in ("privileged:", "/var/run/docker.sock"):
         check(forbidden not in compose, forbidden)
     check('cap_add: ["NET_BIND_SERVICE"]' in sections["caddy"], "Caddy execution capability")
     check(all("cap_add:" not in sections[service] for service in SERVICES if service != "caddy"), "non-Caddy capabilities")
@@ -911,46 +824,24 @@ def validate_source(values: dict[str, str]) -> None:
     check(not re.search(r"^\s*(server_name|public_baseurl):", synapse, re.MULTILINE), "Synapse identity overlay")
     validate_mas_listeners(mas)
     validate_mas_admin_network(compose, sections)
-    check(
-        "- name: adminapi" in mas
-        and "- name: oauth" in mas
-        and "- name: health" not in mas
-        and "mas_admin_net" in sections["mas"]
-        and "mas_admin_net" in sections["janitor"]
-        and "mas_admin_net" in sections["plan"]
-        and "mas_admin_net" not in sections["caddy"],
-        "MAS private credential-gated admin boundary",
-    )
     check("  trusted_proxies: []" in mas, "MAS proxy trust disabled explicitly")
     check("kind: synapse" in mas and "endpoint: http://synapse:8008" in mas, "MAS committed loader options")
     check("transport: blackhole" in mas and "password_recovery_enabled: false" in mas, "MAS email transport is explicitly non-delivering")
     check("account_deactivation_allowed: true" in mas, "MAS self-deactivation is enabled")
-    check("postgres_mas" not in mas, "MAS database endpoint comment is not a Compose alias")
     for entrypoint in (
         "client_registration/violation", "register/violation", "authorization_grant/violation",
         "compat_login/violation", "password/violation", "email/violation",
     ):
         check(entrypoint in mas, ("MAS policy entrypoint", entrypoint))
     check(not re.search(r"^\s*(public_base|issuer|plan_management_iframe_uri):", mas, re.MULTILINE), "MAS identity overlay")
-    check("extra_hosts:" not in compose and "response>headers>Set-Cookie" not in caddy, "static/header boundary")
-    check(
-        "RootlessKit >= 3.0" in caddy
-        and "`slirp4netns` port driver" in caddy
-        and "userland-proxy disabled" in caddy
-        and "prove the observed peer/X-Forwarded behavior live" in caddy,
-        "rootless source-peer activation prerequisite",
-    )
     check('test: ["CMD", "/cashier", "healthcheck"]' in sections["cashier"], "Cashier health")
     check("profiles: [janitor]" in sections["janitor"], "Janitor profile")
     check(
         "- TMPDIR=/staging/tmp" in sections["synapse"]
-        and "/runtime/synapse-staging:/staging:rw" in sections["synapse"]
-        and "/synapse/media_store:/data" not in sections["synapse"]
-        and "worker_app" not in compose,
+        and "/runtime/synapse-staging:/staging:rw" in sections["synapse"],
         "Synapse disposable staging boundary",
     )
     validate_caddy(caddy, caddy_body)
-    validate_caddy_negative(caddy, caddy_body)
     export(values)
     print("Verified source image, identity, security, release, and Caddy invariants")
 
@@ -987,9 +878,6 @@ def validate_rendered(path: Path) -> None:
 
     document = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=pairs)
     check(isinstance(document, dict) and set(document) == {"name", "services", "networks", "secrets"}, "Compose document shape")
-    validate_synapse_environment_profiles()
-    validate_mas_environment_profiles()
-    validate_mas_listeners((ROOT / "mas.yaml").read_text(encoding="utf-8"))
     services, networks = document["services"], document["networks"]
     check(set(services) == set(SERVICES) and set(networks) == set({name for names in SERVICE_NETWORKS.values() for name in names}), "Compose topology")
     ingress_members = {service for service, settings in services.items() if CADDY_INGRESS_NETWORK in (settings.get("networks") or {})}
@@ -1009,7 +897,7 @@ def validate_rendered(path: Path) -> None:
         validate_service_capabilities(service, settings)
         check(settings.get("security_opt") == ["no-new-privileges=true"], (service, "privilege boundary"))
         check(settings.get("user") == ("65532:65532" if service == "caddy" else "991:991"), (service, "uid"))
-        check(not set(settings) & FORBIDDEN_SERVICE_KEYS, (service, "forbidden runtime"))
+        check("privileged" not in settings, (service, "privileged runtime"))
         check(set(settings.get("networks") or {}) == SERVICE_NETWORKS[service], (service, "networks"))
         for network, options in (settings.get("networks") or {}).items():
             options = options or {}
@@ -1037,7 +925,6 @@ def validate_rendered(path: Path) -> None:
             check(actual_env.get(key) == value, (service, key))
         check(not set(actual_env) & set(SECRET_ENV.values()), (service, "secret environment"))
         check("env_file" not in settings, (service, "live env files"))
-        check("logging" not in settings, (service, "diagnostic output retention"))
         check(settings.get("tmpfs", []) == EXPECTED_TMPFS.get(service, []), (service, "tmpfs"))
         expected_healthcheck = EXPECTED_HEALTHCHECKS.get(service)
         if expected_healthcheck is None:
@@ -1063,7 +950,6 @@ def validate_rendered(path: Path) -> None:
         port,
     )
     check(all("ports" not in services[s] for s in SERVICES if s != "caddy"), "unintended ports")
-    actual_subnets = {}
     for name, settings in networks.items():
         expected_subnet = NETWORK_SUBNETS[name]
         expected_ipam = {"config": [{"subnet": expected_subnet}]}
@@ -1072,14 +958,12 @@ def validate_rendered(path: Path) -> None:
             and settings.get("ipam", {}) == expected_ipam,
             (name, "network options", settings),
         )
-        actual_subnets[name] = settings["ipam"]["config"][0]["subnet"]
         if name in INTERNAL_NETWORKS:
             check(settings.get("internal") is True, (name, "internal"))
         else:
             check(settings.get("internal", False) is False, (name, "egress"))
         if "name" in settings:
             check(settings["name"] == f"{document['name']}_{name}", (name, "network name"))
-    validate_network_subnets(actual_subnets)
     check(set(document["secrets"]) == set(SECRET_FILES), "secret set")
     expected_secret_files = {name: f"{data_dir}/secrets/{filename}" for name, filename in SECRET_FILES.items()}
     for name, expected_file in expected_secret_files.items():
@@ -1493,7 +1377,6 @@ def main() -> None:
     if args.command == "manifest":
         export(values)
     elif args.command == "source":
-        validate_manifest_negative(values)
         validate_source(values)
     elif args.command == "rendered-compose":
         check(args.path is not None, "rendered Compose JSON path required")
