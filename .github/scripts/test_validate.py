@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -20,8 +21,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 import validate  # noqa: E402
 
 
-HELPER = Path(__file__).parent / "git_transport.sh"
 CONTAINER_HELPER = Path(__file__).parent / "container-helpers.sh"
+RELEASE_HELPER = Path(__file__).parent / "release-helpers.sh"
+WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "validate.yml"
 
 
 def git(root: Path, *args: str) -> str:
@@ -32,6 +34,14 @@ def git(root: Path, *args: str) -> str:
         check=True,
     )
     return result.stdout.strip()
+
+
+def workflow_run(job_name: str, step_id: str) -> str:
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    for step in workflow["jobs"][job_name]["steps"]:
+        if step.get("id") == step_id:
+            return step["run"]
+    raise AssertionError((job_name, step_id))
 
 
 class ManifestTests(unittest.TestCase):
@@ -694,148 +704,233 @@ class CaddyRouteTests(unittest.TestCase):
                 validate.validate_adapted_caddy(path)
 
 
-class GitTransportTests(unittest.TestCase):
-    def test_transport_retains_the_runner_system_ca_store(self) -> None:
-        helper = HELPER.read_text(encoding="utf-8")
-        self.assertIn("-c http.sslVerify=true", helper)
-        self.assertIn("GIT_SSL_CAINFO", helper)
-        self.assertIn("GIT_SSL_CAPATH", helper)
-        self.assertNotIn("-c http.sslCAInfo=", helper)
-        self.assertNotIn("-c http.sslCAPath=", helper)
-        self.assertNotIn("-c http.sslCert=", helper)
-        self.assertNotIn("-c http.sslKey=", helper)
-
-    def test_remote_operations_keep_git_diagnostics(self) -> None:
-        helper = HELPER.read_text(encoding="utf-8")
-        self.assertIn("git_safe fetch --force --no-tags", helper)
-        self.assertIn("git_safe ls-remote --exit-code", helper)
-        self.assertNotIn("git_safe fetch --quiet", helper)
-        self.assertNotIn("git_safe ls-remote --quiet", helper)
-
-    def test_diagnostic_classifiers_keep_reader_errors_visible(self) -> None:
-        helper = CONTAINER_HELPER.read_text(encoding="utf-8")
-        self.assertNotIn('"$output" 2>/dev/null', helper)
-        self.assertNotIn('"$stderr_file" 2>/dev/null', helper)
-
+class ReleaseWorkflowGitTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory(delete=False, prefix="server-state-git-")
+        self.directory = tempfile.TemporaryDirectory(delete=False, prefix="server-state-release-git-")
         self.root = Path(self.directory.name)
-        git(self.root, "init", "--quiet")
-        (self.root / "fixture").write_text("first\n", encoding="utf-8")
-        git(self.root, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "add", "fixture")
-        git(self.root, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "--quiet", "-m", "first")
+        self.seed = self.root / "seed"
+        self.seed.mkdir()
+        self.origin = self.root / "origin.git"
+        self.checkout = self.root / "checkout"
+        subprocess.run(["/usr/bin/git", "init", "--bare", "--quiet", str(self.origin)], check=True)
+        git(self.seed, "init", "--quiet")
+        self.commit_file("first\n", "first")
+        git(self.seed, "branch", "-M", "main")
+        self.first_commit = git(self.seed, "rev-parse", "HEAD")
+        self.commit_file("second\n", "second")
+        self.release_commit = git(self.seed, "rev-parse", "HEAD")
+        self.tag = f"server-state-{self.release_commit[:8]}"
+        git(self.seed, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "tag", "-a", self.tag, "-m", "release", self.release_commit)
+        self.annotated_tag_sha = git(self.seed, "rev-parse", f"refs/tags/{self.tag}")
+        self.commit_file("third\n", "main advanced")
+        self.main_commit = git(self.seed, "rev-parse", "HEAD")
+        git(self.seed, "remote", "add", "origin", str(self.origin))
+        git(self.seed, "push", "--quiet", "origin", "main", f"refs/tags/{self.tag}")
+        self.make_checkout(self.tag)
 
-    def run_helper(self, *args: str, **environment: str) -> subprocess.CompletedProcess[str]:
+    def tearDown(self) -> None:
+        self.directory.cleanup()
+
+    def commit_file(self, contents: str, message: str) -> None:
+        (self.seed / "fixture").write_text(contents, encoding="utf-8")
+        git(self.seed, "add", "fixture")
+        git(self.seed, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "--quiet", "-m", message)
+
+    def make_checkout(self, tag: str) -> None:
+        if self.checkout.exists():
+            subprocess.run(["/bin/rm", "-rf", str(self.checkout)], check=True)
+        subprocess.run(["/usr/bin/git", "clone", "--quiet", "--no-checkout", str(self.origin), str(self.checkout)], check=True)
+        git(self.checkout, "fetch", "--quiet", "origin", f"refs/tags/{tag}:refs/tags/{tag}")
+        git(self.checkout, "checkout", "--quiet", "--detach", f"refs/tags/{tag}")
+
+    def run_workflow_step(self, job: str, step_id: str, **environment: str) -> subprocess.CompletedProcess[str]:
+        output = self.root / "github-output"
+        output.write_text("", encoding="utf-8")
         return subprocess.run(
-            ["/bin/bash", str(HELPER), *args],
-            cwd=self.root,
-            env={**os.environ, **environment},
+            ["/bin/bash", "-euo", "pipefail", "-c", workflow_run(job, step_id)],
+            cwd=self.checkout,
+            env={
+                **os.environ,
+                "GITHUB_OUTPUT": str(output),
+                **environment,
+            },
             capture_output=True,
             text=True,
+            timeout=15,
+            check=False,
+        )
+
+    def validate_tag(self, tag: str | None = None, event_commit: str | None = None) -> subprocess.CompletedProcess[str]:
+        return self.run_workflow_step(
+            "validate",
+            "release_identity",
+            GITHUB_REF_NAME=tag or self.tag,
+            GITHUB_SHA=event_commit or self.release_commit,
+        )
+
+    def test_annotated_tag_is_accepted_when_main_has_advanced(self) -> None:
+        result = self.validate_tag()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(self.main_commit, self.release_commit)
+        recorded = (self.root / "github-output").read_text(encoding="utf-8")
+        self.assertEqual(recorded, f"release_commit={self.release_commit}\nannotated_tag_sha={self.annotated_tag_sha}\n")
+
+    def test_lightweight_tag_is_rejected(self) -> None:
+        git(self.seed, "tag", "-d", self.tag)
+        git(self.seed, "tag", self.tag, self.release_commit)
+        git(self.seed, "push", "--quiet", "--force", "origin", f"refs/tags/{self.tag}")
+        self.make_checkout(self.tag)
+        result = self.validate_tag()
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_wrong_commit_suffix_is_rejected(self) -> None:
+        wrong_prefix = ("0" if self.release_commit[0] != "0" else "1") + self.release_commit[1:8]
+        wrong_tag = f"server-state-{wrong_prefix}"
+        git(self.seed, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "tag", "-a", wrong_tag, "-m", "wrong suffix", self.release_commit)
+        git(self.seed, "push", "--quiet", "origin", f"refs/tags/{wrong_tag}")
+        self.make_checkout(wrong_tag)
+        result = self.validate_tag(wrong_tag)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_event_commit_must_match_annotated_tag_target(self) -> None:
+        result = self.validate_tag(event_commit=self.main_commit)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_release_commit_outside_main_history_is_rejected(self) -> None:
+        outside = self.root / "outside"
+        outside.mkdir()
+        git(outside, "init", "--quiet")
+        (outside / "fixture").write_text("outside\n", encoding="utf-8")
+        git(outside, "add", "fixture")
+        git(outside, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "--quiet", "-m", "outside")
+        outside_commit = git(outside, "rev-parse", "HEAD")
+        outside_tag = f"server-state-{outside_commit[:8]}"
+        git(outside, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "tag", "-a", outside_tag, "-m", "outside")
+        git(outside, "remote", "add", "origin", str(self.origin))
+        git(outside, "push", "--quiet", "origin", f"refs/tags/{outside_tag}")
+        self.make_checkout(outside_tag)
+        result = self.validate_tag(outside_tag, outside_commit)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_release_job_requires_the_recorded_checkout_and_tag_object(self) -> None:
+        good = self.run_workflow_step(
+            "release",
+            "selected_release_identity",
+            GITHUB_REF_NAME=self.tag,
+            GITHUB_SHA=self.release_commit,
+            RELEASE_COMMIT=self.release_commit,
+            RELEASE_ANNOTATED_TAG_SHA=self.annotated_tag_sha,
+        )
+        self.assertEqual(good.returncode, 0, good.stderr)
+        changed = self.run_workflow_step(
+            "release",
+            "selected_release_identity",
+            GITHUB_REF_NAME=self.tag,
+            GITHUB_SHA=self.release_commit,
+            RELEASE_COMMIT=self.release_commit,
+            RELEASE_ANNOTATED_TAG_SHA=self.first_commit,
+        )
+        self.assertNotEqual(changed.returncode, 0)
+        changed_commit = self.run_workflow_step(
+            "release",
+            "selected_release_identity",
+            GITHUB_REF_NAME=self.tag,
+            GITHUB_SHA=self.release_commit,
+            RELEASE_COMMIT=self.main_commit,
+            RELEASE_ANNOTATED_TAG_SHA=self.annotated_tag_sha,
+        )
+        self.assertNotEqual(changed_commit.returncode, 0)
+
+
+class ReleaseCaptureTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory(delete=False, prefix="server-state-release-capture-")
+        self.root = Path(self.directory.name)
+        self.output = self.root / "output"
+        self.stderr_file = self.root / "stderr"
+
+    def tearDown(self) -> None:
+        self.directory.cleanup()
+
+    def run_capture(self, command: str, *, binary: bool = False, timeout_seconds: int = 5, text: bool = True):
+        helper = shlex.quote(str(RELEASE_HELPER))
+        mode = "--binary-output " if binary else ""
+        shell = (
+            f"source {helper}; capture_command {mode}{shlex.quote(str(self.output))} "
+            f"{shlex.quote(str(self.stderr_file))} {timeout_seconds} {command}"
+        )
+        return subprocess.run(
+            ["/bin/bash", "-euo", "pipefail", "-c", shell],
+            cwd=self.root,
+            capture_output=True,
+            text=text,
             timeout=10,
             check=False,
         )
 
-    def test_reads_use_checkout_identity_despite_ambient_git_state(self) -> None:
-        expected = git(self.root, "rev-parse", "HEAD")
-        result = self.run_helper(
-            "local-read", "rev-parse", "HEAD",
-            GIT_DIR=str(self.root / "missing"),
-            GIT_INDEX_FILE=str(self.root / "missing-index"),
-            GIT_OBJECT_DIRECTORY=str(self.root / "missing-objects"),
-            GIT_REPLACE_REF_BASE="refs/replace/hostile",
-            GIT_CONFIG_COUNT="1",
-            GIT_CONFIG_KEY_0="http.proxy",
-            GIT_CONFIG_VALUE_0="http://evil.invalid",
-            GIT_TRACE="/tmp/server-state-hostile-trace",
-            GIT_TRACE2="/tmp/server-state-hostile-trace2",
-            GIT_TRACE_PACK_ACCESS="1",
-            GIT_TRACE_PERFORMANCE="1",
-            GIT_TRACE_PACKET="1",
-            GIT_TRACE_SHALLOW="1",
-            GIT_CURL_VERBOSE="1",
-            GIT_TRACE2_ENV_VARS="GIT_DIR",
-            GIT_TRACE2_MAX_FILES="1",
-            HTTPS_PROXY="http://evil.invalid",
-            GIT_ALLOW_PROTOCOL="file:ext:ssh",
-            GIT_PROTOCOL_FROM_USER="1",
-        )
+    def test_success_keeps_stdout_for_parsing_and_reports_stderr(self) -> None:
+        result = self.run_capture("/usr/bin/python3 -c 'import sys; print(\"payload\"); print(\"warning\", file=sys.stderr)'")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), expected)
+        self.assertEqual(self.output.read_text(encoding="utf-8"), "payload\n")
+        self.assertEqual(self.stderr_file.read_text(encoding="utf-8"), "warning\n")
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "warning\n")
 
-    def test_accepts_exact_github_actions_https_origin_forms(self) -> None:
-        for origin in (
-            "https://github.com/TeleCrypt-io/server_state",
-            "https://github.com/TeleCrypt-io/server_state.git",
-        ):
-            git(self.root, "remote", "add", "origin", origin)
-            result = self.run_helper("check")
-            self.assertEqual(result.returncode, 0, (origin, result.stderr))
-            git(self.root, "remote", "remove", "origin")
+    def test_failure_replays_complete_text_output_and_preserves_status(self) -> None:
+        result = self.run_capture("/usr/bin/python3 -c 'import sys; print(\"partial\"); print(\"failure\", file=sys.stderr); sys.exit(23)'")
+        self.assertEqual(result.returncode, 23)
+        self.assertEqual(self.output.read_text(encoding="utf-8"), "partial\n")
+        self.assertEqual(self.stderr_file.read_text(encoding="utf-8"), "failure\n")
+        self.assertIn("partial\nfailure\n", result.stderr)
 
-    def test_rejects_github_origin_near_misses(self) -> None:
-        for origin in (
-            "https://github.com/TeleCrypt-io/server_state/",
-            "https://github.com/TeleCrypt-io/server_state.git/",
-            "https://github.com/TeleCrypt-io/server_state.evil",
-            "https://github.com/TeleCrypt-io/server_state-other",
-            "https://github.com/telecrypt-io/server_state",
-            "https://x-access-token:redacted@github.com/TeleCrypt-io/server_state",
-            "git@github.com:TeleCrypt-io/server_state.git",
-        ):
-            git(self.root, "remote", "add", "origin", origin)
-            result = self.run_helper("check")
-            self.assertNotEqual(result.returncode, 0, origin)
-            git(self.root, "remote", "remove", "origin")
+    def test_binary_failure_does_not_replay_payload_to_runner_log(self) -> None:
+        result = self.run_capture(
+            "/usr/bin/python3 -c 'import sys; sys.stdout.buffer.write(b\"\\x00payload\"); print(\"failure\", file=sys.stderr); sys.exit(9)'",
+            binary=True,
+            text=False,
+        )
+        self.assertEqual(result.returncode, 9)
+        self.assertEqual(self.output.read_bytes(), b"\x00payload")
+        self.assertNotIn(b"payload", result.stderr)
+        self.assertIn(b"failure", result.stderr)
 
-    def test_replacement_refs_do_not_change_tag_identity(self) -> None:
-        first_commit = git(self.root, "rev-parse", "HEAD")
-        git(self.root, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "tag", "-a", "v1", "-m", "v1")
-        first_tag = git(self.root, "rev-parse", "refs/tags/v1")
-        (self.root / "fixture").write_text("second\n", encoding="utf-8")
-        git(self.root, "add", "fixture")
-        git(self.root, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "--quiet", "-m", "second")
-        second_tag = git(self.root, "rev-parse", "HEAD")
-        git(self.root, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "tag", "-a", "v2", "-m", "v2")
-        git(self.root, "replace", first_tag, git(self.root, "rev-parse", "refs/tags/v2"))
-        raw = self.run_helper("local-read", "rev-parse", "refs/tags/v1")
-        peeled = self.run_helper("local-read", "rev-parse", "refs/tags/v1^{}")
-        self.assertEqual(raw.returncode, 0, raw.stderr)
-        self.assertEqual(peeled.returncode, 0, peeled.stderr)
-        self.assertEqual(raw.stdout.strip(), first_tag)
-        self.assertEqual(peeled.stdout.strip(), first_commit)
-        self.assertNotEqual(second_tag, first_commit)
+    def test_timeout_replays_partial_diagnostics_and_returns_timeout_status(self) -> None:
+        result = self.run_capture("/bin/bash -c 'printf started; sleep 10'", timeout_seconds=1)
+        self.assertEqual(result.returncode, 124)
+        self.assertEqual(self.output.read_text(encoding="utf-8"), "started")
+        self.assertIn("started", result.stderr)
 
-    def test_transport_accepts_only_canonical_bounded_refs(self) -> None:
-        wrong_repo = self.run_helper("fetch", "Other/repository", "refs/heads/main:refs/remotes/origin/main")
-        self.assertNotEqual(wrong_repo.returncode, 0)
-        option = self.run_helper("fetch", "TeleCrypt-io/server_state", "--upload-pack=/tmp/hostile")
-        self.assertNotEqual(option.returncode, 0)
-        malformed = self.run_helper("local-read", "rev-parse", "--option")
-        self.assertNotEqual(malformed.returncode, 0)
-
-    def test_rejects_repository_local_transport_configuration(self) -> None:
-        for key, value in (
-            ("url.hostile.insteadOf", "https://github.com/"),
-            ("url.hostile.pushInsteadOf", "https://github.com/"),
-            ("include.path", str(self.root / "included-config")),
-            ("includeIf.onbranch:main.path", str(self.root / "included-config")),
-            ("credential.helper", "store"),
-            ("hooks.allownonstdhook", "true"),
-            ("core.hooksPath", str(self.root / "hooks")),
-            ("remote.origin.vcs", "hostile-helper"),
-            ("remote.origin.proxy", "http://evil.invalid"),
-            ("remote.origin.uploadpack", "/tmp/hostile-upload-pack"),
-            ("remote.origin.receivepack", "/tmp/hostile-receive-pack"),
-            ("remote.origin.pushurl", "https://evil.invalid/repository.git"),
-            ("remote.evil.vcs", "hostile-helper"),
-            ("remote.evil.pushurl", "https://evil.invalid/repository.git"),
-            ("remote.evil.url", "https://evil.invalid/repository.git"),
-        ):
-            git(self.root, "config", "--local", key, value)
-            result = self.run_helper("local-read", "rev-parse", "HEAD")
-            self.assertNotEqual(result.returncode, 0, key)
-            git(self.root, "config", "--local", "--unset-all", key)
+    def test_signal_terminates_active_capture_and_replays_output(self) -> None:
+        helper = shlex.quote(str(RELEASE_HELPER))
+        shell = (
+            f"source {helper}; capture_command {shlex.quote(str(self.output))} "
+            f"{shlex.quote(str(self.stderr_file))} 20 "
+            "/usr/bin/python3 -c 'import time; print(\"started\", flush=True); time.sleep(20)'"
+        )
+        process = subprocess.Popen(
+            ["/bin/bash", "-euo", "pipefail", "-c", shell],
+            cwd=self.root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        try:
+            for _ in range(100):
+                if self.output.exists() and self.output.read_text(encoding="utf-8") == "started\n":
+                    break
+                if process.poll() is not None:
+                    self.fail("capture command exited before signal test started")
+                time.sleep(0.02)
+            else:
+                self.fail("capture command did not start")
+            os.killpg(process.pid, 15)
+            _stdout, stderr = process.communicate(timeout=5)
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, 9)
+                process.communicate(timeout=5)
+        self.assertEqual(process.returncode, 143, stderr.decode(errors="replace"))
+        self.assertIn(b"started", stderr)
 
 
 class ReleaseEvidenceTests(unittest.TestCase):

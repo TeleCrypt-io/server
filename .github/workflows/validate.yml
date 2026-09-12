@@ -17,23 +17,14 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      release_commit: ${{ steps.release_identity.outputs.release_commit }}
+      annotated_tag_sha: ${{ steps.release_identity.outputs.annotated_tag_sha }}
     env:
       TELECRYPT_DATA_DIR: /tmp/telecrypt-data
       BILLING_ENVIRONMENT: test
-      GIT_CONFIG_SYSTEM: /dev/null
-      GIT_CONFIG_GLOBAL: /tmp/telecrypt-gitconfig
-      GIT_CONFIG_NOSYSTEM: "1"
-      GIT_CONFIG_COUNT: "1"
-      GIT_CONFIG_KEY_0: credential.helper
-      GIT_CONFIG_VALUE_0: ""
     steps:
       - uses: actions/checkout@v7.0.1
-        env:
-          GIT_CONFIG_COUNT: "2"
-          GIT_CONFIG_KEY_0: init.defaultBranch
-          GIT_CONFIG_VALUE_0: main
-          GIT_CONFIG_KEY_1: advice.detachedHead
-          GIT_CONFIG_VALUE_1: "false"
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -87,22 +78,24 @@ jobs:
             exit 1
           fi
 
-      - name: Require annotated exact release tag on refreshed main
+      - name: Verify selected annotated release identity
+        id: release_identity
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF_NAME" =~ ^server-state-[0-9a-f]{7,10}$ ]]
-          git_value() { bash .github/scripts/git_transport.sh local-read "$1" "$2"; }
-          test "$(git_value cat-file-type "refs/tags/$GITHUB_REF_NAME")" = tag
-          release_commit="$(git_value rev-parse "refs/tags/$GITHUB_REF_NAME^{commit}")"
+          release_tag_ref="refs/tags/$GITHUB_REF_NAME"
+          test "$(git cat-file -t "$release_tag_ref")" = tag
+          release_commit="$(git rev-parse "$release_tag_ref^{commit}")"
           release_suffix="${GITHUB_REF_NAME#server-state-}"
           [[ "$release_commit" == "$release_suffix"* ]]
           test "$release_commit" = "$GITHUB_SHA"
-          bash .github/scripts/git_transport.sh fetch "$GITHUB_REPOSITORY" \
-            refs/heads/main:refs/remotes/origin/main
-          test "$(git_value rev-parse HEAD)" = "$release_commit"
-          test "$release_commit" = "$GITHUB_SHA"
-          test "$release_commit" = "$(git_value rev-parse refs/remotes/origin/main)"
+          test "$(git rev-parse HEAD)" = "$release_commit"
+          timeout --signal=TERM --kill-after=5s 30s git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$release_commit" refs/remotes/origin/main
+          printf 'release_commit=%s\n' "$release_commit" >>"$GITHUB_OUTPUT"
+          printf 'annotated_tag_sha=%s\n' "$(git rev-parse "$release_tag_ref")" >>"$GITHUB_OUTPUT"
 
       - name: Validate Compose
         run: |
@@ -546,23 +539,27 @@ jobs:
       contents: write
       packages: read
     env:
-      GIT_CONFIG_SYSTEM: /dev/null
-      GIT_CONFIG_GLOBAL: /tmp/telecrypt-gitconfig
-      GIT_CONFIG_NOSYSTEM: "1"
-      GIT_CONFIG_COUNT: "1"
-      GIT_CONFIG_KEY_0: credential.helper
-      GIT_CONFIG_VALUE_0: ""
+      RELEASE_COMMIT: ${{ needs.validate.outputs.release_commit }}
+      RELEASE_ANNOTATED_TAG_SHA: ${{ needs.validate.outputs.annotated_tag_sha }}
     steps:
       - uses: actions/checkout@v7.0.1
-        env:
-          GIT_CONFIG_COUNT: "2"
-          GIT_CONFIG_KEY_0: init.defaultBranch
-          GIT_CONFIG_VALUE_0: main
-          GIT_CONFIG_KEY_1: advice.detachedHead
-          GIT_CONFIG_VALUE_1: "false"
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify selected release checkout
+        id: selected_release_identity
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^server-state-[0-9a-f]{7,10}$ ]]
+          release_commit="${RELEASE_COMMIT:?validated release commit was not passed from the validation job}"
+          annotated_tag_sha="${RELEASE_ANNOTATED_TAG_SHA:?validated annotated tag was not passed from the validation job}"
+          release_tag_ref="refs/tags/$GITHUB_REF_NAME"
+          test "$GITHUB_SHA" = "$release_commit"
+          test "$(git rev-parse HEAD)" = "$release_commit"
+          test "$(git cat-file -t "$release_tag_ref")" = tag
+          test "$(git rev-parse "$release_tag_ref")" = "$annotated_tag_sha"
+          test "$(git rev-parse "$release_tag_ref^{commit}")" = "$release_commit"
 
       - name: Create exact GitHub Release record
         env:
@@ -597,98 +594,8 @@ jobs:
           }
           trap cleanup_on_exit EXIT
 
-          capture_active_pid=""
-          capture_active_output=""
-          capture_active_stderr=""
-          capture_active_replay_output=true
-          capture_command_signal() {
-            local signal_name="$1" status=143 kill_status wait_status replay_status=0
-            case "$signal_name" in
-              HUP) status=129 ;;
-              INT) status=130 ;;
-              TERM) status=143 ;;
-              *) status=143 ;;
-            esac
-            set +e
-            if [[ -n "$capture_active_pid" ]]; then
-              kill -0 "$capture_active_pid"
-              kill_status=$?
-              if [[ "$kill_status" -eq 0 ]]; then
-                kill -TERM "$capture_active_pid"
-                kill_status=$?
-                if [[ "$kill_status" -ne 0 ]]; then
-                  printf 'release capture child termination failed during %s (status %s)\n' "$signal_name" "$kill_status" >&2
-                fi
-              elif [[ "$kill_status" -ne 1 ]]; then
-                printf 'release capture child liveness check failed during %s (status %s)\n' "$signal_name" "$kill_status" >&2
-              fi
-              wait "$capture_active_pid"
-              wait_status=$?
-              capture_active_pid=""
-              if [[ "$wait_status" -eq 127 ]]; then
-                printf 'release capture child wait failed during %s\n' "$signal_name" >&2
-              fi
-            fi
-            if [[ -n "$capture_active_output" && "$capture_active_replay_output" == true ]] && ! cat -- "$capture_active_output" >&2; then replay_status=1; fi
-            if [[ -n "$capture_active_stderr" ]] && ! cat -- "$capture_active_stderr" >&2; then replay_status=1; fi
-            if [[ "$replay_status" -ne 0 ]]; then
-              printf 'release capture diagnostics could not be replayed after %s\n' "$signal_name" >&2
-            fi
-            exit "$status"
-          }
-
-          capture_command() {
-            local replay_output=true
-            if [[ "${1:-}" == --binary-output ]]; then
-              replay_output=false
-              shift
-            fi
-            local output="$1" stderr="$2" timeout_seconds="$3" status replay_status=0
-            shift 3
-            local previous_hup previous_int previous_term
-            previous_hup="$(trap -p HUP || true)"
-            previous_int="$(trap -p INT || true)"
-            previous_term="$(trap -p TERM || true)"
-            capture_active_output="$output"
-            capture_active_stderr="$stderr"
-            capture_active_replay_output="$replay_output"
-            trap 'capture_command_signal HUP' HUP
-            trap 'capture_command_signal INT' INT
-            trap 'capture_command_signal TERM' TERM
-            set +e
-            timeout --signal=TERM --kill-after=5s "${timeout_seconds}s" "$@" >"$output" 2>"$stderr" &
-            capture_active_pid="$!"
-            wait "$capture_active_pid"
-            status=$?
-            set -e
-            capture_active_pid=""
-            capture_active_output=""
-            capture_active_stderr=""
-            capture_active_replay_output=true
-            if [[ -n "$previous_hup" ]]; then eval "$previous_hup"; else trap - HUP; fi
-            if [[ -n "$previous_int" ]]; then eval "$previous_int"; else trap - INT; fi
-            if [[ -n "$previous_term" ]]; then eval "$previous_term"; else trap - TERM; fi
-            if [[ "$status" -ne 0 ]]; then
-              if [[ "$replay_output" == true ]] && ! cat -- "$output" >&2; then replay_status=1; fi
-              if ! cat -- "$stderr" >&2; then replay_status=1; fi
-              if [[ "$replay_status" -ne 0 ]]; then
-                echo 'captured command diagnostics could not be replayed' >&2
-              fi
-              return "$status"
-            fi
-            if ! cat -- "$stderr" >&2; then
-              echo 'captured command stderr could not be emitted' >&2
-              return 1
-            fi
-            return 0
-          }
-
-          replay_capture() {
-            local output="$1" stderr="$2" status=0
-            if ! cat -- "$output" >&2; then status=1; fi
-            if ! cat -- "$stderr" >&2; then status=1; fi
-            return "$status"
-          }
+          # shellcheck disable=SC1091
+          source .github/scripts/release-helpers.sh
 
           capture_jq() {
             local output="$1" stderr="$2" status
@@ -736,39 +643,10 @@ jobs:
             return "$status"
           }
 
-          [[ "$GITHUB_REF_NAME" =~ ^server-state-[0-9a-f]{7,10}$ ]]
-          release_commit="$GITHUB_SHA"
-          release_suffix="${GITHUB_REF_NAME#server-state-}"
-          [[ "$release_commit" == "$release_suffix"* ]]
-          git_value() { bash .github/scripts/git_transport.sh local-read "$1" "$2"; }
-          test "$(git_value rev-parse HEAD)" = "$release_commit"
-          test "$(git_value cat-file-type "refs/tags/$GITHUB_REF_NAME")" = tag
-          checkout_annotated_tag_sha="$(git_value rev-parse "refs/tags/$GITHUB_REF_NAME")"
+          release_commit="$RELEASE_COMMIT"
+          export SERVER_STATE_ANNOTATED_TAG_SHA="$RELEASE_ANNOTATED_TAG_SHA"
           python3 .github/scripts/validate.py source
 
-          verify_source_identity() {
-            local current_annotated_tag_sha current_tag_commit remote_annotated_tag_sha remote_tag_path
-            timeout --signal=TERM --kill-after=5s 30s bash .github/scripts/git_transport.sh fetch "$GITHUB_REPOSITORY" \
-              refs/heads/main:refs/remotes/origin/main \
-              "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
-            test "$(git_value cat-file-type "refs/tags/$GITHUB_REF_NAME")" = tag
-            current_annotated_tag_sha="$(git_value rev-parse "refs/tags/$GITHUB_REF_NAME")"
-            test "$current_annotated_tag_sha" = "$checkout_annotated_tag_sha"
-            current_tag_commit="$(git_value rev-parse "refs/tags/$GITHUB_REF_NAME^{commit}")"
-            test "$current_tag_commit" = "$release_commit"
-            test "$(git_value rev-parse HEAD)" = "$release_commit"
-            test "$(git_value rev-parse refs/remotes/origin/main)" = "$release_commit"
-            remote_tag_path="$metadata_dir/remote-tag.log"
-            capture_command "$remote_tag_path" "$remote_tag_path.stderr" 30 bash .github/scripts/git_transport.sh ls-remote "$GITHUB_REPOSITORY" \
-              "refs/tags/$GITHUB_REF_NAME"
-            test "$(wc -l < "$remote_tag_path")" = 1
-            remote_annotated_tag_sha="$(awk 'NF == 2 { print $1 }' "$remote_tag_path")"
-            [[ "$remote_annotated_tag_sha" =~ ^[0-9a-f]{40}$ ]]
-            test "$remote_annotated_tag_sha" = "$checkout_annotated_tag_sha"
-          }
-
-          verify_source_identity
-          export SERVER_STATE_ANNOTATED_TAG_SHA="$checkout_annotated_tag_sha"
           # shellcheck disable=SC1091
           source versions.env
           METADATA_DIR="$metadata_dir" timeout --signal=TERM --kill-after=5s 240s .github/scripts/fetch_product_releases.sh
@@ -995,9 +873,6 @@ jobs:
             fi
           }
 
-          # Re-fetch the source identity after all registry work and immediately before the
-          # release transaction. The tag and current remote main must still name this commit.
-          verify_source_identity
           discover_release
           case "$release_discovery_state" in
             published)
@@ -1009,8 +884,6 @@ jobs:
               check_server_draft "$release_json_path" "$release_id"
               ;;
             absent)
-              # Reconfirm the authoritative source immediately before the only create mutation.
-              verify_source_identity
               create_path="$metadata_dir/release-create.json"
               set +e
               capture_command "$create_path" "$metadata_dir/release-create.error" 60 \
@@ -1069,8 +942,7 @@ jobs:
             '.assets | select(length == 1) | .[0] | select(.name == $name and (.id | type == "number" and . == floor and . > 0)) | .id'
           draft_dir="$RUNNER_TEMP/draft-release"
           download_and_compare_manifest "$draft_dir" "$release_asset_id"
-          # Reconfirm source and the exact numeric draft immediately before publication.
-          verify_source_identity
+          # Recheck the exact numeric draft immediately before publication.
           get_release_by_id "$release_id"
           check_server_draft "$release_json_path" "$release_id"
           timeout --signal=TERM --kill-after=5s 60s \

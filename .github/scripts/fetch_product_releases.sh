@@ -5,60 +5,10 @@ set -euo pipefail
 : "${METADATA_DIR:?METADATA_DIR is required}"
 
 MAX_RELEASE_ASSET_BYTES=1048576
-active_pid=""
-active_output=""
-active_stderr=""
-active_replay_output=true
 captured_stderr_files=()
 
-signal_exit() {
-  local signal_name="$1" status=143 kill_status wait_status replay_status=0
-  case "$signal_name" in
-    HUP) status=129 ;;
-    INT) status=130 ;;
-    TERM) status=143 ;;
-    *) status=143 ;;
-  esac
-  set +e
-  if [[ -n "$active_pid" ]]; then
-    kill -0 "$active_pid"
-    kill_status=$?
-    if [[ "$kill_status" -ne 0 ]]; then
-      if [[ "$kill_status" -ne 1 ]]; then
-        printf 'GitHub API child liveness check failed during %s (status %s)\n' "$signal_name" "$kill_status" >&2
-      fi
-    else
-      kill -TERM "$active_pid"
-      kill_status=$?
-      if [[ "$kill_status" -ne 0 ]]; then
-        printf 'GitHub API child termination failed during %s (status %s)\n' "$signal_name" "$kill_status" >&2
-      fi
-    fi
-    wait "$active_pid"
-    wait_status=$?
-    active_pid=""
-    if [[ "$wait_status" -eq 127 ]]; then
-      printf 'GitHub API child wait failed during %s\n' "$signal_name" >&2
-    fi
-    if [[ "$wait_status" -eq 0 ]]; then
-      printf 'GitHub API child exited successfully while handling %s\n' "$signal_name" >&2
-    fi
-  fi
-  if [[ -n "$active_output" && "$active_replay_output" == true ]] && ! cat -- "$active_output" >&2; then
-    replay_status=1
-  fi
-  if [[ -n "$active_stderr" ]] && ! cat -- "$active_stderr" >&2; then
-    replay_status=1
-  fi
-  if [[ "$replay_status" -ne 0 ]]; then
-    printf 'GitHub API diagnostics could not be replayed after %s\n' "$signal_name" >&2
-  fi
-  exit "$status"
-}
-
-trap 'signal_exit HUP' HUP
-trap 'signal_exit INT' INT
-trap 'signal_exit TERM' TERM
+# shellcheck disable=SC1091
+source .github/scripts/release-helpers.sh
 
 capture_api() {
   local replay_output=true
@@ -66,45 +16,24 @@ capture_api() {
     replay_output=false
     shift
   fi
-  local output="$1" phase="$2" repository="$3" tag="$4"
+  local output="$1" phase="$2" repository="$3" tag="$4" status=0
   shift 4
-  local stderr="$output.stderr" status
+  local stderr="$output.stderr"
   captured_stderr_files+=("$stderr")
-  active_output="$output"
-  active_stderr="$stderr"
-  active_replay_output="$replay_output"
-  set +e
-  timeout --signal=TERM --kill-after=5s 60s gh api "$@" >"$output" 2>"$stderr" &
-  active_pid="$!"
-  wait "$active_pid"
-  status=$?
-  set -e
-  active_pid=""
-  active_output=""
-  active_stderr=""
-  active_replay_output=true
-  if [[ "$status" -ne 0 ]]; then
-    echo "GitHub API request failed (phase=$phase repository=$repository tag=$tag; status $status)" >&2
-    if [[ "$replay_output" == true ]]; then
-      cat -- "$output" >&2
+  if [[ "$replay_output" == true ]]; then
+    if capture_command "$output" "$stderr" 60 gh api "$@"; then
+      return 0
+    else
+      status="$?"
     fi
-    cat -- "$stderr" >&2
-  elif [[ -s "$stderr" ]]; then
-    cat -- "$stderr" >&2
+  else
+    if capture_command --binary-output "$output" "$stderr" 60 gh api "$@"; then
+      return 0
+    else
+      status="$?"
+    fi
   fi
-  if [[ "$status" -ne 0 ]]; then
-    return "$status"
-  fi
-}
-
-replay_api_response() {
-  local output="$1" stderr="$2" status=0
-  if ! cat -- "$output" >&2; then
-    status=1
-  fi
-  if ! cat -- "$stderr" >&2; then
-    status=1
-  fi
+  echo "GitHub API request failed (phase=$phase repository=$repository tag=$tag; status $status)" >&2
   return "$status"
 }
 
@@ -117,7 +46,7 @@ validate_api_json() {
     status="$?"
   fi
   echo "GitHub API response failed semantic validation (phase=$phase repository=$repository tag=$tag)" >&2
-  replay_api_response "$output" "$output.stderr" ||
+  replay_capture "$output" "$output.stderr" ||
     echo "GitHub API response diagnostics could not be replayed (phase=$phase repository=$repository tag=$tag)" >&2
   return "$status"
 }
@@ -132,7 +61,7 @@ extract_api_json() {
     status="$?"
   fi
   echo "GitHub API response failed semantic extraction (phase=$phase repository=$repository tag=$tag)" >&2
-  replay_api_response "$output" "$output.stderr" ||
+  replay_capture "$output" "$output.stderr" ||
     echo "GitHub API response diagnostics could not be replayed (phase=$phase repository=$repository tag=$tag)" >&2
   return "$status"
 }
@@ -204,13 +133,13 @@ fetch_release_asset() {
     "repos/$repository/releases/assets/$asset_id"
   if [[ ! -s "$asset_path" ]]; then
     echo "GitHub release asset was empty (repository=$repository tag=$tag asset=$asset_name)" >&2
-    replay_api_response "$release_path" "$release_path.stderr" ||
+    replay_capture "$release_path" "$release_path.stderr" ||
       echo "GitHub release response diagnostics could not be replayed (repository=$repository tag=$tag)" >&2
     return 1
   fi
   if [[ "$(wc -c < "$asset_path")" -gt "$MAX_RELEASE_ASSET_BYTES" ]]; then
     echo "GitHub release asset exceeded the supported size (repository=$repository tag=$tag asset=$asset_name)" >&2
-    replay_api_response "$release_path" "$release_path.stderr" ||
+    replay_capture "$release_path" "$release_path.stderr" ||
       echo "GitHub release response diagnostics could not be replayed (repository=$repository tag=$tag)" >&2
     return 1
   fi
@@ -221,7 +150,7 @@ fetch_release_asset() {
     select(type == "number" and . == floor and . > 0)'
   if [[ "$(wc -c < "$asset_path")" -ne "$expected_asset_size" ]]; then
     echo "GitHub release asset size mismatch (repository=$repository tag=$tag asset=$asset_name)" >&2
-    replay_api_response "$release_path" "$release_path.stderr" ||
+    replay_capture "$release_path" "$release_path.stderr" ||
       echo "GitHub release response diagnostics could not be replayed (repository=$repository tag=$tag)" >&2
     return 1
   fi
