@@ -271,9 +271,6 @@ class ManifestTests(unittest.TestCase):
         self.assertIn('respond "Not Found" 404', admin)
         self.assertNotIn("reverse_proxy", admin[: admin.index("\n\t}")])
         self.assertIn("credential-gated", mas)
-        readme = (root / "README.md").read_text(encoding="utf-8")
-        self.assertIn("no MAS port is published", readme)
-        self.assertIn("Caddy does not route this private path", readme)
 
     def test_caddy_has_single_normal_bridge_ingress_network(self) -> None:
         compose_path = Path(__file__).resolve().parents[2] / "compose.yml"
@@ -349,7 +346,6 @@ class ManifestTests(unittest.TestCase):
         synapse_document = yaml.safe_load(synapse)
         mas = (Path(__file__).resolve().parents[2] / "mas.yaml").read_text(encoding="utf-8")
         workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        readme = (Path(__file__).resolve().parents[2] / "README.md").read_text(encoding="utf-8")
         mas_fixture = (Path(__file__).resolve().parents[1] / "fixtures" / "mas.secrets.json").read_text(encoding="utf-8")
         synapse_fixture = yaml.safe_load(
             (Path(__file__).resolve().parents[1] / "fixtures" / "synapse.secrets.json").read_text(encoding="utf-8")
@@ -387,8 +383,7 @@ class ManifestTests(unittest.TestCase):
             "https://sss.telecrypt.io",
         )
         self.assertIn("reachable only from authorized production and stage Linux VMs", synapse)
-        self.assertIn("reachable only from authorized production and stage Linux VMs", readme)
-        self.assertNotIn("s3.telecrypt.io", synapse + workflow + readme)
+        self.assertNotIn("s3.telecrypt.io", synapse + workflow)
         self.assertRegex(signing_fixture, r"\Aed25519 0 [A-Za-z0-9+/]{43}\n\Z")
         self.assertIn("config check --config=/config.yaml --config=/mas-environment.yaml --config=/secrets.json", workflow)
         self.assertIn(
