@@ -896,7 +896,6 @@ def validate_source(values: dict[str, str]) -> None:
     check(
         not re.search(r"^\s*database:\s*$", synapse, re.MULTILINE)
         and not re.search(r"^\s*matrix_authentication_service:\s*$", synapse, re.MULTILINE)
-        and "shallow-merged by top-level key" in synapse
         and synapse_fixture.get("database", {}).get("name") == "psycopg2"
         and set(synapse_fixture.get("database", {}).get("args", {}))
         == {"user", "password", "database", "host", "port", "sslmode", "connect_timeout"}
@@ -906,7 +905,6 @@ def validate_source(values: dict[str, str]) -> None:
         and len(synapse_media_providers) == 1
         and synapse_media_providers[0].get("config", {}).get("endpoint_url")
         == "https://sss.telecrypt.io"
-        and "reachable only from authorized production and stage Linux VMs" in synapse
         and "media_store_path: /staging/media" in synapse,
         "Synapse complete private loader maps",
     )

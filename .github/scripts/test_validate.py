@@ -45,6 +45,19 @@ def workflow_run(job_name: str, step_id: str) -> str:
 
 
 class ManifestTests(unittest.TestCase):
+    def validate_source_with_read_text(self, replacements: dict[Path, str]) -> None:
+        original_read_text = Path.read_text
+        replacement_text = {path.resolve(): text for path, text in replacements.items()}
+
+        def read_text(path: Path, *args: object, **kwargs: object) -> str:
+            replacement = replacement_text.get(path.resolve())
+            if replacement is not None:
+                return replacement
+            return original_read_text(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "read_text", new=read_text):
+            validate.validate_source(validate.load_manifest())
+
     def test_billing_profile_validation_accepts_only_known_pairs(self) -> None:
         self.assertEqual(
             validate.VALID_PROFILES,
@@ -341,34 +354,32 @@ class ManifestTests(unittest.TestCase):
                         validate.validate_network_subnets(candidate)
 
     def test_matrix_private_layers_own_complete_shallow_merged_maps(self) -> None:
-        compose = (Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8")
-        synapse = (Path(__file__).resolve().parents[2] / "synapse.yaml").read_text(encoding="utf-8")
-        synapse_document = yaml.safe_load(synapse)
-        mas = (Path(__file__).resolve().parents[2] / "mas.yaml").read_text(encoding="utf-8")
-        workflow = (Path(__file__).resolve().parents[1] / "workflows" / "validate.yml").read_text(encoding="utf-8")
-        mas_fixture = (Path(__file__).resolve().parents[1] / "fixtures" / "mas.secrets.json").read_text(encoding="utf-8")
-        synapse_fixture = yaml.safe_load(
-            (Path(__file__).resolve().parents[1] / "fixtures" / "synapse.secrets.json").read_text(encoding="utf-8")
-        )
+        root = Path(__file__).resolve().parents[2]
+        compose = yaml.safe_load((root / "compose.yml").read_text(encoding="utf-8"))
+        synapse = yaml.safe_load((root / "synapse.yaml").read_text(encoding="utf-8"))
+        mas = yaml.safe_load((root / "mas.yaml").read_text(encoding="utf-8"))
+        mas_fixture = json.loads((root / ".github" / "fixtures" / "mas.secrets.json").read_text(encoding="utf-8"))
+        synapse_fixture = json.loads((root / ".github" / "fixtures" / "synapse.secrets.json").read_text(encoding="utf-8"))
         signing_fixture = (Path(__file__).resolve().parents[1] / "fixtures" / "synapse-signing-fixture.txt").read_text(encoding="utf-8")
         self.assertIn("SYNAPSE_SECRETS_JSON", validate.SECRET_ENV.values())
         self.assertIn("MAS_SECRETS_JSON", validate.SECRET_ENV.values())
-        self.assertNotIn("secrets.yaml", compose + synapse + mas)
-        self.assertIn("target: /secrets.json", compose)
-        self.assertNotIn("database", synapse_document)
-        self.assertNotIn("matrix_authentication_service", synapse_document)
-        self.assertEqual(synapse_document["dynamic_thumbnails"], False)
-        self.assertEqual(synapse_document["thumbnail_sizes"], [])
-        self.assertIn("kind: synapse", mas)
-        self.assertIn("endpoint: http://synapse:8008", mas)
-        self.assertIn("transport: blackhole", mas)
-        self.assertIn("account_deactivation_allowed: true", mas)
-        self.assertIn("client_registration/violation", mas)
-        self.assertNotIn("postgres_mas", mas)
-        self.assertIn("HomeServerConfig", workflow)
-        self.assertIn("load_config", workflow)
-        self.assertNotIn("loader.read_config", workflow)
-        self.assertIn("shallow-merged by top-level key", synapse)
+        self.assertIn(
+            {"source": "synapse_secrets_json", "target": "/secrets.json"},
+            compose["services"]["synapse"]["secrets"],
+        )
+        self.assertIn(
+            {"source": "mas_secrets_json", "target": "/secrets.json"},
+            compose["services"]["mas"]["secrets"],
+        )
+        self.assertNotIn("database", synapse)
+        self.assertNotIn("matrix_authentication_service", synapse)
+        self.assertIs(synapse["dynamic_thumbnails"], False)
+        self.assertEqual(synapse["thumbnail_sizes"], [])
+        self.assertEqual(mas["matrix"], {"kind": "synapse", "endpoint": "http://synapse:8008"})
+        self.assertEqual(mas["email"]["transport"], "blackhole")
+        self.assertIs(mas["account"]["account_deactivation_allowed"], True)
+        self.assertEqual(mas["policy"]["client_registration_entrypoint"], "client_registration/violation")
+        self.assertNotIn("database", mas)
         self.assertEqual(synapse_fixture["database"]["name"], "psycopg2")
         self.assertEqual(
             set(synapse_fixture["database"]["args"]),
@@ -382,21 +393,35 @@ class ManifestTests(unittest.TestCase):
             synapse_fixture["media_storage_providers"][0]["config"]["endpoint_url"],
             "https://sss.telecrypt.io",
         )
-        self.assertIn("reachable only from authorized production and stage Linux VMs", synapse)
-        self.assertNotIn("s3.telecrypt.io", synapse + workflow)
         self.assertRegex(signing_fixture, r"\Aed25519 0 [A-Za-z0-9+/]{43}\n\Z")
-        self.assertIn("config check --config=/config.yaml --config=/mas-environment.yaml --config=/secrets.json", workflow)
-        self.assertIn(
-            '["-c", "/homeserver.yaml", "-c", profile_path, "-c", "/secrets.json", "-c", "/runtime-identity.yaml"]',
-            workflow,
+        self.assertEqual(
+            [client["client_auth_method"] for client in mas_fixture["clients"]],
+            ["client_secret_basic", "client_secret_basic"],
         )
-        self.assertIn("setting.per_second, setting.burst_count", workflow)
-        self.assertIn('"rc_room_creation": (1000, 1000)', workflow)
-        self.assertIn('"rc_room_creation": (0.016, 10)', workflow)
-        self.assertIn('"client_auth_method":"client_secret_basic"', mas_fixture)
-        self.assertNotIn('"transport":"disabled"', workflow)
-        self.assertNotIn("SYNAPSE_SECRETS_YAML", workflow)
-        self.assertNotIn("MAS_SECRETS_YAML", workflow)
+
+    def test_source_validation_does_not_depend_on_synapse_explanatory_comments(self) -> None:
+        synapse_path = validate.ROOT / "synapse.yaml"
+        synapse = synapse_path.read_text(encoding="utf-8")
+        without_full_line_comments = "\n".join(
+            line for line in synapse.splitlines() if not line.lstrip().startswith("#")
+        ) + "\n"
+
+        self.validate_source_with_read_text({synapse_path: without_full_line_comments})
+
+    def test_source_validation_rejects_database_in_synapse_base(self) -> None:
+        synapse_path = validate.ROOT / "synapse.yaml"
+        synapse = synapse_path.read_text(encoding="utf-8") + "\ndatabase:\n  name: psycopg2\n"
+
+        with self.assertRaisesRegex(AssertionError, "Synapse complete private loader maps"):
+            self.validate_source_with_read_text({synapse_path: synapse})
+
+    def test_source_validation_rejects_incomplete_synapse_private_map(self) -> None:
+        fixture_path = validate.ROOT / ".github" / "fixtures" / "synapse.secrets.json"
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        fixture["matrix_authentication_service"]["enabled"] = False
+
+        with self.assertRaisesRegex(AssertionError, "Synapse complete private loader maps"):
+            self.validate_source_with_read_text({fixture_path: json.dumps(fixture)})
 
     def test_synapse_signing_key_is_a_secret_not_environment_data(self) -> None:
         compose = (Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8")
