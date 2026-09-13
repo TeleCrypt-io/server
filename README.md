@@ -103,11 +103,11 @@ with exactly the five image keys used by Compose (`CADDY_IMAGE`, `SYNAPSE_IMAGE`
 rejects any Compose image tag, first-party image label, default command, entrypoint, user, route, or
 public-origin contract that differs from the selected release contract. The state release is an
 identity for one configuration commit, not a package version. Controlplane and Cashier images
-advertise config contract `1`, and trusted exact state-tag runs of the public workflow
-authenticate to GHCR to verify both first-party images as well as the public images; main and
-pull-request runs receive the exact local contract checks without registry credentials. Do not change
-`versions.env` or `compose.yml` independently; update their exact coordinates and contracts together
-in one reviewed exact state change.
+advertise config contract `1`. The validation workflow runs on pushes to `main` and
+`server-state-*` tags. It authenticates to GHCR and checks all five selected image manifests on each
+run; only tag runs verify the release identity and publish a state release. Pull requests do not
+trigger this workflow. Do not change `versions.env` or `compose.yml` independently; update their
+exact coordinates and contracts together in one reviewed exact state change.
 
 ## Security and licence
 
