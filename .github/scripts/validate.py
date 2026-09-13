@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Dependency-free checks for the Server State source and release contract.
+"""Checks for Server State's rendered Compose contract and release evidence.
 
-Compose is the parser for Compose.  This module checks the small set of invariants that Compose
-cannot express: image coordinates, identity derivation, security boundaries, route policy, OCI
-provenance, and the immutable release evidence used by the final manifest.
+Docker Compose parses compose.yml; this module checks its rendered deployment contract alongside
+the product configuration and release provenance.
 """
 
 from __future__ import annotations
@@ -63,8 +62,6 @@ JANITOR_ENV_KEYS = {
     "MAS_ADMIN_CLIENT_ID", "MAS_ADMIN_CLIENT_SECRET", "JANITOR_DB_URL", "OWNER_EMAIL",
     "SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM",
 }
-JANITOR_REQUIRED_ENV_KEYS = {"MAS_ADMIN_CLIENT_ID", "MAS_ADMIN_CLIENT_SECRET", "JANITOR_DB_URL"}
-JANITOR_OPTIONAL_ENV_KEYS = JANITOR_ENV_KEYS - JANITOR_REQUIRED_ENV_KEYS
 PLAN_ENV_KEYS = {"MAS_ADMIN_CLIENT_ID", "MAS_ADMIN_CLIENT_SECRET", "MAS_OIDC_CLIENT_ID", "MAS_OIDC_CLIENT_SECRET", "PLAN_SESSION_KEY", "PLAN_ASSERTION_PRIVATE_KEY"}
 CASHIER_ENV_KEYS = {
     "SYNAPSE_ADMIN_TOKEN", "CASHIER_DB_URL", "DODO_API_KEY", "DODO_WEBHOOK_SECRET",
@@ -355,29 +352,6 @@ def derived_public_site_host(env_text: str) -> str:
     return "www.telecrypt.io" if name == "telecrypt.io" else ""
 
 
-def service_section(compose: str, service: str) -> str:
-    found = re.search(rf"(?ms)^  {re.escape(service)}:\n(?P<body>.*?)(?=^  [a-z][a-z0-9_-]*:\n|\Z)", compose)
-    check(found, f"missing {service} service")
-    return found.group("body")
-
-
-def service_network_names(service_body: str) -> set[str]:
-    found = re.search(r"(?m)^    networks:\n(?P<body>(?:^      .*(?:\n|\Z))*)", service_body)
-    check(found, "missing service networks")
-    names = re.findall(r"^      ([a-z][a-z0-9_-]*):(?:[ \t].*)?$", found.group("body"), re.MULTILINE)
-    check(len(names) == len(set(names)), "duplicate service network")
-    return set(names)
-
-
-def service_network_options(service_body: str, network: str) -> str:
-    found = re.search(
-        rf"(?m)^      {re.escape(network)}:\n(?P<body>(?:^        .*(?:\n|\Z))*)",
-        service_body,
-    )
-    check(found, (network, "missing service network"))
-    return found.group("body")
-
-
 def validate_mas_listeners(mas: str) -> None:
     """Require MAS's supported socket-address listener contract.
 
@@ -430,70 +404,7 @@ def validate_synapse_prejoin_state(synapse: str) -> None:
     )
 
 
-def validate_mas_admin_network(compose: str, sections: dict[str, str]) -> None:
-    """Require one deterministic private MAS admin interface and no alias-based bind path."""
-    check(
-        ipaddress.ip_address(MAS_ADMIN_ADDRESS) in ipaddress.ip_network(MAS_ADMIN_SUBNET),
-        "MAS admin address/subnet",
-    )
-    admin_network = re.search(
-        r"(?ms)^  mas_admin_net:\n(?P<body>.*?)(?=^  [a-z][a-z0-9_-]*:\n|\Z)",
-        compose[compose.index("\nnetworks:") + 1 :],
-    )
-    check(admin_network, "MAS admin network declaration")
-    network_body = admin_network.group("body")
-    check(
-        re.search(r"(?m)^    internal: true\s*$", network_body)
-        and re.findall(r"(?m)^        - subnet: ([^\s]+)\s*$", network_body) == [MAS_ADMIN_SUBNET],
-        "MAS admin private subnet",
-    )
-    mas_admin_options = service_network_options(sections["mas"], "mas_admin_net")
-    check(
-        re.fullmatch(
-            r"        aliases:\n          - mas-admin\n"
-            r"        ipv4_address: " + re.escape(MAS_ADMIN_ADDRESS) + r"\n?",
-            mas_admin_options,
-        ),
-        "MAS admin alias and static address",
-    )
-    for service in ("janitor", "plan"):
-        check(not service_network_options(sections[service], "mas_admin_net").strip(), (service, "static admin address"))
-    for service, networks in SERVICE_NETWORKS.items():
-        for network in networks:
-            if service == "mas" and network == "mas_admin_net":
-                continue
-            options = service_network_options(sections[service], network)
-            check(
-                "ipv4_address:" not in options and "aliases:" not in options,
-                (service, network, "unexpected network option"),
-            )
-
-
-def validate_source_topology(compose: str, sections: dict[str, str]) -> None:
-    for service, expected in SERVICE_NETWORKS.items():
-        check(service_network_names(sections[service]) == expected, (service, "networks"))
-
-    networks_start = compose.index("\nnetworks:")
-    networks_text = compose[networks_start:]
-    matches = list(re.finditer(r"(?m)^  ([a-z][a-z0-9_-]*):[ \t]*$", networks_text))
-    blocks = {
-        match.group(1): networks_text[match.end(): (matches[index + 1].start() if index + 1 < len(matches) else len(networks_text))]
-        for index, match in enumerate(matches)
-    }
-    expected_networks = set().union(*SERVICE_NETWORKS.values())
-    check(len(matches) == len(blocks) and set(blocks) == expected_networks, "network declarations")
-    actual_subnets = {}
-    for name, body in blocks.items():
-        internal = re.search(r"(?m)^    internal:[ \t]*true[ \t]*$", body) is not None
-        check(internal is (name in INTERNAL_NETWORKS), (name, "internal"))
-        subnets = re.findall(r"(?m)^        - subnet: ([^\s]+)[ \t]*$", body)
-        check(len(subnets) == 1, (name, "IPAM subnet"))
-        actual_subnets[name] = subnets[0]
-    check(actual_subnets == NETWORK_SUBNETS, ("network IPAM map", actual_subnets))
-    check(CADDY_INGRESS_NETWORK in blocks and CADDY_INGRESS_NETWORK not in INTERNAL_NETWORKS, "Caddy ingress network")
-
-
-def validate_caddy(caddy: str, caddy_body: str) -> None:
+def validate_caddy(caddy: str) -> None:
     def matcher(name: str) -> str:
         found = re.search(rf"(?ms)^\t@{name} \{{.*?^\t\}}", caddy)
         check(found, f"missing {name} matcher")
@@ -625,7 +536,7 @@ def validate_caddy(caddy: str, caddy_body: str) -> None:
     check("method POST" in dodo and "path /webhooks/dodo" in dodo and "reverse_proxy cashier:9011" in handle and 'Cache-Control "no-store"' in handle, "Dodo route")
     check("uri replace" not in handle and not re.search(r"(?m)^\s*log_skip @dodo_webhook\s*$", caddy), "Dodo route stability")
     consumed = set(re.findall(r"\{\$([A-Z][A-Z0-9_]*)\}", caddy))
-    declared = set(re.findall(r"^\s+- ([A-Z][A-Z0-9_]*)=", caddy_body, re.MULTILINE))
+    declared = SERVICE_ENV_KEYS["caddy"]
     check(consumed <= declared, ("undeclared Caddy variables", consumed - declared))
     check("@synapse path_regexp ^/_matrix/(client|media)(/|$)" in caddy, "Synapse route")
     admin = caddy[caddy.index("@mas_admin path /auth/api/admin /auth/api/admin/*"):]
@@ -711,37 +622,9 @@ def validate_adapted_caddy(path: Path) -> None:
 
 
 def validate_source(values: dict[str, str]) -> None:
-    compose = (ROOT / "compose.yml").read_text(encoding="utf-8")
     caddy = (ROOT / "Caddyfile").read_text(encoding="utf-8")
     env_text = (ROOT / ".env.example").read_text(encoding="utf-8")
     env = assignments(env_text)
-    sections = {service: service_section(compose, service) for service in SERVICES}
-    validate_source_topology(compose, sections)
-    boundary = compose.index("\n# Compose file-backed secrets")
-    check(set(re.findall(r"(?m)^  ([a-z][a-z0-9_-]*):$", compose[:boundary])) == set(SERVICES), "service set")
-    for service, key in SERVICE_IMAGES.items():
-        check(re.findall(r"(?m)^    image: (.+)$", sections[service]) == [f"${{{key}:?set {key}}}"], (service, "image placeholder"))
-    check(len(re.findall(r"(?m)^    image:", compose)) == len(SERVICE_IMAGES) and not re.search(r"(?m)^    image: [^$]", compose), "image indirection")
-    check("build:" not in compose, "local builds")
-    check("container_name:" not in compose, "global container names")
-    for forbidden in ("privileged:", "/var/run/docker.sock"):
-        check(forbidden not in compose, forbidden)
-    check('cap_add: ["NET_BIND_SERVICE"]' in sections["caddy"], "Caddy execution capability")
-    check(all("cap_add:" not in sections[service] for service in SERVICES if service != "caddy"), "non-Caddy capabilities")
-    check("ports:" in sections["caddy"] and all("ports:" not in sections[s] for s in SERVICES if s != "caddy"), "listener ownership")
-    check("env_file:" not in compose, "live env files")
-    check("secrets:" not in sections["caddy"], "Caddy credentials")
-    check("secrets:" not in sections["registration"] and "volumes:" not in sections["registration"], "registration credentials")
-    for service in ("janitor", "plan", "cashier"):
-        private_keys = SERVICE_ENV_KEYS[service] - {"SERVER_NAME"}
-        required_keys = JANITOR_REQUIRED_ENV_KEYS if service == "janitor" else private_keys
-        optional_keys = JANITOR_OPTIONAL_ENV_KEYS if service == "janitor" else set()
-        for key in required_keys:
-            check(f"{key}=${{{key}:?set {key}}}" in sections[service], (service, key, "required environment"))
-        for key in optional_keys:
-            check(f"{key}=${{{key}:-}}" in sections[service], (service, key, "optional environment"))
-    check("SERVER_NAME=${SERVER_NAME:?set SERVER_NAME}" in "".join(sections[s] for s in ("registration", "janitor", "plan", "cashier")), "runtime identity")
-    check("BILLING_ENVIRONMENT=${BILLING_ENVIRONMENT:?set BILLING_ENVIRONMENT}" in "".join(sections[s] for s in ("janitor", "plan", "cashier")), "billing identity")
     check(set(env) == {"TELECRYPT_DATA_DIR", "SERVER_NAME", "BILLING_ENVIRONMENT", "INGRESS_BIND_ADDRESS", "TRUSTED_PROXY"}, env)
     validate_profile(env)
     check(not set(env) & set(SECRET_ENV.values()) and not set(env) & set(IMAGE_KEYS), "operator secret/image variables")
@@ -749,17 +632,6 @@ def validate_source(values: dict[str, str]) -> None:
     check(str(ingress) == env["INGRESS_BIND_ADDRESS"] and not (ingress.is_unspecified or ingress.is_loopback or ingress.is_multicast or ingress.is_link_local), env["INGRESS_BIND_ADDRESS"])
     trusted = ipaddress.ip_interface(env["TRUSTED_PROXY"])
     check(trusted.network.prefixlen == trusted.network.max_prefixlen and str(trusted) == env["TRUSTED_PROXY"] and not (trusted.ip.is_unspecified or trusted.ip.is_loopback or trusted.ip.is_multicast or trusted.ip.is_link_local), env["TRUSTED_PROXY"])
-    caddy_body = sections["caddy"]
-    for key in ("TRUSTED_PROXY", "SERVER_NAME"):
-        check(f"- {key}=${{{key}:?set {key}}}" in caddy_body, key)
-    check(
-        "host_ip: ${INGRESS_BIND_ADDRESS:?set INGRESS_BIND_ADDRESS}" in caddy_body
-        and "target: 8080" in caddy_body and "published: 8080" in caddy_body
-        and "protocol: tcp" in caddy_body and "mode: ingress" in caddy_body,
-        "Caddy listener",
-    )
-    for service in ("caddy", "registration", "synapse", "mas"):
-        check("BILLING_ENVIRONMENT" not in sections[service], (service, "billing isolation"))
     expected_public_site = "www.telecrypt.io" if env["SERVER_NAME"] == "telecrypt.io" else ""
     check(
         derived_backend_host(env_text) == f"backend.{env['SERVER_NAME']}"
@@ -767,8 +639,6 @@ def validate_source(values: dict[str, str]) -> None:
         "derived hosts",
     )
     check(not any(f"{name}=" in env_text for name in SECRET_ENV.values()), "secret variable in operator environment")
-    for text in ('user: "65532:65532"', "read_only: true", 'security_opt: ["no-new-privileges=true"]', 'cap_drop: ["ALL"]'):
-        check(text in caddy_body, ("Caddy", text))
     synapse = (ROOT / "synapse.yaml").read_text(encoding="utf-8")
     mas = (ROOT / "mas.yaml").read_text(encoding="utf-8")
     check(
@@ -783,22 +653,6 @@ def validate_source(values: dict[str, str]) -> None:
     )
     validate_synapse_environment_profiles()
     validate_mas_environment_profiles()
-    check(
-        "./synapse.${SERVER_NAME:?set SERVER_NAME}.yaml:/synapse-environment.yaml:ro" in sections["synapse"],
-        "Synapse environment profile mount",
-    )
-    check(
-        'command: ["-c", "/homeserver.yaml", "-c", "/synapse-environment.yaml", "-c", "/secrets.json", "-c", "/runtime-identity.yaml"]' in sections["synapse"],
-        "Synapse config order",
-    )
-    check(
-        "./mas.${SERVER_NAME:?set SERVER_NAME}.yaml:/mas-environment.yaml:ro" in sections["mas"],
-        "MAS environment profile mount",
-    )
-    check(
-        'command: ["server", "--config=/config.yaml", "--config=/mas-environment.yaml", "--config=/secrets.json", "--config=/runtime-identity.yaml"]' in sections["mas"],
-        "MAS config order",
-    )
     check(not re.search(r"^rate_limiting:\s*$", mas, re.MULTILINE), "MAS base owns no environment rate")
     check("url_preview_enabled: false" in synapse, "Synapse URL previews disabled")
     validate_synapse_prejoin_state(synapse)
@@ -823,7 +677,6 @@ def validate_source(values: dict[str, str]) -> None:
     )
     check(not re.search(r"^\s*(server_name|public_baseurl):", synapse, re.MULTILINE), "Synapse identity overlay")
     validate_mas_listeners(mas)
-    validate_mas_admin_network(compose, sections)
     check("  trusted_proxies: []" in mas, "MAS proxy trust disabled explicitly")
     check("kind: synapse" in mas and "endpoint: http://synapse:8008" in mas, "MAS committed loader options")
     check("transport: blackhole" in mas and "password_recovery_enabled: false" in mas, "MAS email transport is explicitly non-delivering")
@@ -834,16 +687,9 @@ def validate_source(values: dict[str, str]) -> None:
     ):
         check(entrypoint in mas, ("MAS policy entrypoint", entrypoint))
     check(not re.search(r"^\s*(public_base|issuer|plan_management_iframe_uri):", mas, re.MULTILINE), "MAS identity overlay")
-    check('test: ["CMD", "/cashier", "healthcheck"]' in sections["cashier"], "Cashier health")
-    check("profiles: [janitor]" in sections["janitor"], "Janitor profile")
-    check(
-        "- TMPDIR=/staging/tmp" in sections["synapse"]
-        and "/runtime/synapse-staging:/staging:rw" in sections["synapse"],
-        "Synapse disposable staging boundary",
-    )
-    validate_caddy(caddy, caddy_body)
+    validate_caddy(caddy)
     export(values)
-    print("Verified source image, identity, security, release, and Caddy invariants")
+    print("Verified deployment identity, Synapse/MAS configuration, and Caddy routes")
 
 
 def _env_map(value: object) -> dict:
@@ -883,6 +729,10 @@ def validate_rendered(path: Path) -> None:
     ingress_members = {service for service, settings in services.items() if CADDY_INGRESS_NETWORK in (settings.get("networks") or {})}
     check(ingress_members == {"caddy"}, "Caddy ingress network ownership")
     check(networks[CADDY_INGRESS_NETWORK].get("internal", False) is False, "Caddy ingress network is non-internal")
+    check(
+        ipaddress.ip_address(MAS_ADMIN_ADDRESS) in ipaddress.ip_network(NETWORK_SUBNETS["mas_admin_net"]),
+        "MAS admin address/subnet",
+    )
     env_text = (ROOT / ".env.example").read_text(encoding="utf-8")
     env = assignments(env_text)
     manifest = load_manifest()
