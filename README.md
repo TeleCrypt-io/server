@@ -3,8 +3,8 @@
 Public runtime configuration for the TeleCrypt Matrix service:
 
 Current TeleCrypt project facts and decisions are maintained only in the canonical
-[`llms.txt`](https://telecrypt.io/llms.txt); this README documents this repository's deployment
-composition and release contract.
+[`llms.txt`](https://telecrypt-io.github.io/llms-authority/llms.txt); this README documents this
+repository's deployment composition and release contract.
 
 ## Configuration and activation
 
@@ -70,8 +70,8 @@ The MAS admin listener has no externally reachable port; no MAS port is publishe
 
 The operator's private Harness owns billing-environment procedures, provider authority, private-input
 handling, and billing acceptance. Current public billing facts and decisions remain in the canonical
-[`llms.txt`](https://telecrypt.io/llms.txt); this repository retains only its configuration assembly
-and release contract.
+[`llms.txt`](https://telecrypt-io.github.io/llms-authority/llms.txt); this repository retains only its
+configuration assembly and release contract.
 
 ## Releases
 
@@ -84,13 +84,16 @@ manifest contains only its selected coordinate and digest; the private Harness o
 operations and the secret-file contract.
 
 A deliberately pushed, reviewed state tag receives an exact `server-state-<short-git-sha>` GitHub
-Release record through a draft-first flow. The validation job requires an annotated tag whose commit
+Release through the standard GitHub CLI. The validation job requires an annotated tag whose commit
 matches both the tag suffix and push event, then checks that commit is an ancestor of the fetched
 `main` branch. It passes that commit and tag-object identity to the release job, which verifies the
 same checkout before generating the manifest. `main` may advance while the workflow runs. The
-workflow verifies complete draft metadata and asset bytes before publishing, and resumes only an
-exact draft. A pre-existing published Release is refused. It selects exact component image releases,
-which must already be published and verified. The
+release job creates the release only after it has verified the exact component releases, OCI
+provenance, and image digests; it then reads back the immutable release and downloads the manifest
+to verify its exact bytes. An existing same-tag release is left unchanged, and GitHub CLI reports
+the conflict. If publication fails after leaving a partial draft, the owner must inspect and remove
+it before retrying; the workflow does not attempt recovery. It selects exact component image
+releases, which must already be published and verified. The
 private Cashier immutable-Release check is intentionally an owner-authenticated local Harness gate
 performed before Server State selection; the hosted workflow validates Cashier only from its selected
 public GHCR digest and the exact OCI source, version, and revision labels. The Release's single JSON asset binds those selected tags to their observed canonical

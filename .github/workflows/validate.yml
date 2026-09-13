@@ -561,7 +561,7 @@ jobs:
           test "$(git rev-parse "$release_tag_ref")" = "$annotated_tag_sha"
           test "$(git rev-parse "$release_tag_ref^{commit}")" = "$release_commit"
 
-      - name: Create exact GitHub Release record
+      - name: Create immutable GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -572,103 +572,36 @@ jobs:
           metadata_dir="$(mktemp -d)"
           manifest_name="server-state-${GITHUB_REF_NAME#server-state-}-images.json"
           manifest_path="$RUNNER_TEMP/$manifest_name"
-          release_json_path="$RUNNER_TEMP/release.json"
-          release_error_path="$RUNNER_TEMP/release.error"
-          release_headers_path="$RUNNER_TEMP/release.headers"
-          final_release_json_path="$RUNNER_TEMP/final-release.json"
-          draft_dir="$RUNNER_TEMP/draft-release"
-          final_dir="$RUNNER_TEMP/final-release"
           cleanup() {
-            local status=0
-            if ! rm -rf -- "$authdir" "$metadata_dir" "$manifest_path"; then status=1; fi
-            if ! rm -f -- "$release_json_path" "$release_error_path" "$release_headers_path"; then status=1; fi
-            if ! rm -f -- "$final_release_json_path"; then status=1; fi
-            if ! rm -rf -- "$draft_dir" "$final_dir"; then status=1; fi
-            return "$status"
+            rm -rf -- "$authdir" "$metadata_dir"
+            rm -f -- "$manifest_path"
           }
-          cleanup_on_exit() {
-            local status=$?
-            trap - EXIT
-            if ! cleanup && [[ "$status" -eq 0 ]]; then status=1; fi
-            exit "$status"
-          }
-          trap cleanup_on_exit EXIT
-
-          # shellcheck disable=SC1091
-          source .github/scripts/release-helpers.sh
-
-          capture_jq() {
-            local output="$1" stderr="$2" status
-            shift 2
-            if jq -e "$@" "$output" >/dev/null; then
-              return 0
-            else
-              status="$?"
-            fi
-            replay_capture "$output" "$stderr" || echo 'captured response diagnostics could not be replayed' >&2
-            return "$status"
-          }
-
-          capture_extract() {
-            local variable="$1" output="$2" stderr="$3" value status
-            shift 3
-            if value="$(jq -er "$@" "$output")"; then
-              printf -v "$variable" '%s' "$value"
-              return 0
-            else
-              status="$?"
-            fi
-            replay_capture "$output" "$stderr" || echo 'captured response diagnostics could not be replayed' >&2
-            return "$status"
-          }
-
-          http_status() {
-            local count
-            count="$(grep -Ec '^HTTP/[0-9.]+[[:space:]][0-9]{3}([[:space:]]|$)' "$1")"
-            test "$count" -eq 1
-            sed -n '1s/^HTTP\/[0-9.]*[[:space:]]\([0-9][0-9][0-9]\).*$/\1/p' "$1"
-          }
-
-          http_body() {
-            awk 'BEGIN { body = 0 } { line = $0; sub(/\r$/, "", line); if (!body) { if (line == "") body = 1; next } print }' "$1"
-          }
-
-          replay_discovery_pages() {
-            local status=0 page_headers
-            for page_headers in "$metadata_dir"/release-page-*.headers; do
-              [[ -e "$page_headers" ]] || continue
-              if ! cat -- "$page_headers" >&2; then status=1; fi
-              if ! cat -- "$page_headers.error" >&2; then status=1; fi
-            done
-            return "$status"
-          }
+          trap cleanup EXIT
 
           release_commit="$RELEASE_COMMIT"
           export SERVER_STATE_ANNOTATED_TAG_SHA="$RELEASE_ANNOTATED_TAG_SHA"
           python3 .github/scripts/validate.py source
 
-          # shellcheck disable=SC1091
           source versions.env
           METADATA_DIR="$metadata_dir" timeout --signal=TERM --kill-after=5s 240s .github/scripts/fetch_product_releases.sh
-          login_stdout="$metadata_dir/skopeo-login.stdout"
           registry_token="$GH_TOKEN"
           unset GH_TOKEN
-          if ! printf '%s' "$registry_token" | container_command --sensitive --inherit-stdin "$login_stdout" 30 skopeo login --authfile "$authfile" \
+          skopeo_login_output="$metadata_dir/skopeo-login.stdout"
+          if ! printf '%s' "$registry_token" | container_command --sensitive --inherit-stdin "$skopeo_login_output" 30 skopeo login --authfile "$authfile" \
             --username "$GITHUB_ACTOR" --password-stdin ghcr.io; then
             unset registry_token
-            rm -f -- "$login_stdout" "$login_stdout.stderr"
+            rm -f -- "$skopeo_login_output" "$skopeo_login_output.stderr"
             echo 'registry authentication failed' >&2
             exit 1
           fi
-          rm -f -- "$login_stdout" "$login_stdout.stderr"
+          rm -f -- "$skopeo_login_output" "$skopeo_login_output.stderr"
           for key in CADDY_IMAGE SYNAPSE_IMAGE MAS_IMAGE CONTROLPLANE_IMAGE CASHIER_IMAGE; do
             image="${!key}"
             name="$(python3 .github/scripts/validate.py image-name "$image")"
             repository="${image%:*}"
             digest_path="$metadata_dir/$key.tag-digest"
-            # Resolve each deployment tag once. Keep this top-level tag/index digest as the exact
-            # deployment coordinate; inspect the linux/amd64 child selected through that immutable
-            # digest for metadata, labels, and config while Compose keeps the human-readable tag.
+            # Keep the selected registry index digest as the deployment coordinate and inspect its
+            # linux/amd64 image for the OCI config and provenance labels used by the release manifest.
             container_command "$digest_path" 60 skopeo inspect --authfile "$authfile" --no-tags --format '{{.Digest}}' \
               "docker://$image"
             resolved_digest="$(<"$digest_path")"
@@ -686,9 +619,6 @@ jobs:
           done
           python3 .github/scripts/validate.py image-release-manifest \
             "$metadata_dir" "$GITHUB_REF_NAME" "$manifest_path"
-          manifest_digest="sha256:$(sha256sum "$manifest_path" | awk '{print $1}')"
-          manifest_size="$(wc -c < "$manifest_path")"
-          test "$manifest_size" -gt 0 -a "$manifest_size" -le 1048576
           verify_registry_digests() {
             for key in CADDY_IMAGE SYNAPSE_IMAGE MAS_IMAGE CONTROLPLANE_IMAGE CASHIER_IMAGE; do
               image="${!key}"
@@ -696,268 +626,19 @@ jobs:
               digest_path="$metadata_dir/$key.digest"
               container_command "$digest_path" 60 skopeo inspect \
                 --authfile "$authfile" --no-tags --format '{{.Digest}}' "docker://$image"
-              current_digest="$(<"$digest_path")"
-              test "$current_digest" = "$expected_digest"
+              test "$(<"$digest_path")" = "$expected_digest"
             done
           }
           verify_registry_digests
           export GH_TOKEN="$registry_token"
 
-          release_body="Exact server_state image digest manifest for commit $release_commit."
-          check_server_release() {
-            local release_path="$1" release_id="$2"
-            capture_jq "$release_path" "$release_error_path" --arg id "$release_id" --arg tag "$GITHUB_REF_NAME" \
-              --arg name "$manifest_name" --arg digest "$manifest_digest" \
-              --arg body "$release_body" \
-              --argjson size "$manifest_size" '
-                (.id | type) == "number" and (.id | tostring) == $id and (.id == (.id | floor)) and .id > 0 and
-                (.body | type) == "string" and .body == $body and
-                .tag_name == $tag and .name == $tag and .draft == false and .prerelease == false and .immutable == true and
-                (.assets | length) == 1 and
-                .assets[0].name == $name and (.assets[0] | has("label") and .label == "") and .assets[0].state == "uploaded" and
-                (.assets[0].id | type) == "number" and (.assets[0].id == (.assets[0].id | floor)) and .assets[0].id > 0 and
-                (.assets[0].size | type) == "number" and (.assets[0].size == (.assets[0].size | floor)) and .assets[0].size == $size and .assets[0].size > 0 and .assets[0].size <= 1048576 and
-                (.assets[0].digest | type) == "string" and .assets[0].digest == $digest
-              '
-          }
-          check_server_draft() {
-            local release_path="$1" release_id="$2"
-            capture_jq "$release_path" "$release_error_path" --arg id "$release_id" --arg tag "$GITHUB_REF_NAME" --arg name "$manifest_name" \
-              --arg body "$release_body" '
-                (.id | type) == "number" and (.id | tostring) == $id and (.id == (.id | floor)) and .id > 0 and
-                (.body | type) == "string" and .body == $body and
-                .tag_name == $tag and .name == $tag and .draft == true and .prerelease == false and
-                (.assets | type == "array" and length <= 1) and
-                ((.assets | length) == 0 or
-                  ((.assets | length) == 1 and .assets[0].name == $name and
-                   .assets[0].label == "" and
-                   .assets[0].state == "uploaded" and
-                   (.assets[0].id | type) == "number" and (.assets[0].id == (.assets[0].id | floor)) and .assets[0].id > 0 and
-                   (.assets[0].size | type) == "number" and (.assets[0].size == (.assets[0].size | floor)) and .assets[0].size > 0 and .assets[0].size <= 1048576))
-              '
-          }
-          get_release_by_id() {
-            local release_id="$1" command_status code
-            [[ "$release_id" =~ ^[1-9][0-9]*$ ]]
-            set +e
-            capture_command "$release_headers_path" "$release_error_path" 30 \
-              gh api --include --hostname github.com \
-              --header 'Accept: application/vnd.github+json' \
-              --header 'X-GitHub-Api-Version: 2026-03-10' \
-              "repos/$GITHUB_REPOSITORY/releases/$release_id"
-            command_status=$?
-            set -e
-            if code="$(http_status "$release_headers_path")"; then
-              :
-            else
-              command_status="$?"
-              replay_capture "$release_headers_path" "$release_error_path" || echo 'release response diagnostics could not be replayed' >&2
-              return "$command_status"
-            fi
-            case "$code" in
-              200)
-                if [[ "$command_status" -ne 0 ]]; then
-                  return "$command_status"
-                fi
-                if ! http_body "$release_headers_path" >"$release_json_path"; then
-                  replay_capture "$release_headers_path" "$release_error_path" || echo 'release response diagnostics could not be replayed' >&2
-                  return 1
-                fi
-                return 0
-                ;;
-              404)
-                if [[ "$command_status" -eq 0 ]]; then
-                  replay_capture "$release_headers_path" "$release_error_path" || echo 'release response diagnostics could not be replayed' >&2
-                  return 1
-                fi
-                return 4
-              ;;
-              *)
-                replay_capture "$release_headers_path" "$release_error_path" || echo 'release response diagnostics could not be replayed' >&2
-                return 1
-                ;;
-            esac
-          }
-          discover_release() {
-            local page=1 page_size list_status list_code page_headers page_json match_count extraction_status
-            local matches_path="$metadata_dir/release-matches.jsonl"
-            : >"$matches_path"
-            : >"$matches_path.error"
-            while :; do
-              page_headers="$metadata_dir/release-page-$page.headers"
-              page_json="$metadata_dir/release-page-$page.json"
-              set +e
-              capture_command "$page_headers" "$page_headers.error" 30 \
-                gh api --include --hostname github.com \
-                --header 'Accept: application/vnd.github+json' \
-                --header 'X-GitHub-Api-Version: 2026-03-10' \
-                "repos/$GITHUB_REPOSITORY/releases?per_page=100&page=$page"
-              list_status=$?
-              set -e
-              if [[ "$list_status" -ne 0 ]]; then
-                return "$list_status"
-              fi
-              if list_code="$(http_status "$page_headers")"; then
-                :
-              else
-                list_status="$?"
-                replay_capture "$page_headers" "$page_headers.error" || echo 'release list response diagnostics could not be replayed' >&2
-                return "$list_status"
-              fi
-              if [[ "$list_code" != 200 ]]; then
-                replay_capture "$page_headers" "$page_headers.error" || echo 'release list response diagnostics could not be replayed' >&2
-                return 1
-              fi
-              if ! http_body "$page_headers" >"$page_json"; then
-                replay_capture "$page_headers" "$page_headers.error" || echo 'release list response diagnostics could not be replayed' >&2
-                return 1
-              fi
-              if capture_jq "$page_json" "$page_headers.error" 'type == "array" and length <= 100'; then
-                :
-              else
-                return "$?"
-              fi
-              if ! jq -c --arg tag "$GITHUB_REF_NAME" '.[] | select(.tag_name == $tag) | {id,tag_name,draft}' "$page_json" >>"$matches_path"; then
-                replay_capture "$page_json" "$page_headers.error" || echo 'release list response diagnostics could not be replayed' >&2
-                return 1
-              fi
-              capture_extract page_size "$page_json" "$page_headers.error" 'length'
-              if [[ "$page_size" -lt 100 ]]; then
-                break
-              fi
-              page=$((page + 1))
-            done
-            if capture_extract match_count "$matches_path" "$matches_path.error" -s 'length'; then
-              :
-            else
-              extraction_status="$?"
-              replay_discovery_pages || echo 'release list diagnostics could not be replayed' >&2
-              return "$extraction_status"
-            fi
-            if [[ "$match_count" -gt 1 ]]; then
-              replay_discovery_pages || echo 'release list diagnostics could not be replayed' >&2
-              return 1
-            fi
-            if [[ "$match_count" -eq 0 ]]; then
-              release_discovery_state="absent"
-              release_id=""
-              return 0
-            fi
-            if capture_extract release_id "$matches_path" "$matches_path.error" -s '.[0].id | select(type == "number" and . == floor and . > 0) | tostring'; then
-              :
-            else
-              extraction_status="$?"
-              replay_discovery_pages || echo 'release list diagnostics could not be replayed' >&2
-              return "$extraction_status"
-            fi
-            if capture_extract release_discovery_state "$matches_path" "$matches_path.error" -s 'if .[0].draft == true then "draft" elif .[0].draft == false then "published" else empty end'; then
-              :
-            else
-              extraction_status="$?"
-              replay_discovery_pages || echo 'release list diagnostics could not be replayed' >&2
-              return "$extraction_status"
-            fi
-          }
-          download_and_compare_manifest() {
-            local directory="$1" asset_id="$2"
-            mkdir -p "$directory"
-            capture_command "$directory/$manifest_name" "$directory/$manifest_name.error" 120 gh api \
-              --hostname github.com \
-              --header 'Accept: application/octet-stream' \
-              --header 'X-GitHub-Api-Version: 2026-03-10' \
-              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
-            if ! cmp -- "$manifest_path" "$directory/$manifest_name"; then
-              echo 'downloaded server-state manifest did not match the generated manifest' >&2
-              replay_capture "$directory/$manifest_name" "$directory/$manifest_name.error" || echo 'manifest diagnostics could not be replayed' >&2
-              return 1
-            fi
-          }
-
-          discover_release
-          case "$release_discovery_state" in
-            published)
-              echo "An exact published Release already exists; refusing to mutate it" >&2
-              exit 1
-              ;;
-            draft)
-              get_release_by_id "$release_id"
-              check_server_draft "$release_json_path" "$release_id"
-              ;;
-            absent)
-              create_path="$metadata_dir/release-create.json"
-              set +e
-              capture_command "$create_path" "$metadata_dir/release-create.error" 60 \
-                gh api --hostname github.com --method POST \
-                --header 'Accept: application/vnd.github+json' \
-                --header 'X-GitHub-Api-Version: 2026-03-10' \
-                --raw-field "tag_name=$GITHUB_REF_NAME" \
-                --raw-field "name=$GITHUB_REF_NAME" \
-                --raw-field "body=$release_body" \
-                --raw-field "target_commitish=$release_commit" \
-                --field draft=true --field prerelease=false \
-                "repos/$GITHUB_REPOSITORY/releases"
-              create_status=$?
-              set -e
-              if [[ "$create_status" -eq 0 ]]; then
-                capture_extract release_id "$create_path" "$metadata_dir/release-create.error" \
-                  '.id | select(type == "number" and . == floor and . > 0) | tostring'
-              else
-                # A lost create response is recoverable only through a complete, unique draft
-                # discovery. Any absent or ambiguous result fails closed.
-                discover_release
-                if [[ "$release_discovery_state" != draft ]]; then
-                  replay_capture "$create_path" "$metadata_dir/release-create.error" || echo 'release create response diagnostics could not be replayed' >&2
-                  exit 1
-                fi
-              fi
-              get_release_by_id "$release_id"
-              check_server_draft "$release_json_path" "$release_id"
-              ;;
-            *)
-              echo "Release discovery returned an unknown state" >&2
-              exit 1
-              ;;
-          esac
-          capture_extract asset_count "$release_json_path" "$release_error_path" '.assets|length'
-          if [[ "$asset_count" -eq 0 ]]; then
-            test "$manifest_size" -le 1048576
-            capture_extract upload_url "$release_json_path" "$release_error_path" '.upload_url | select(type == "string" and test("^https://uploads\\.github\\.com/repos/[^/]+/[^/]+/releases/[0-9]+/assets\\{\\?name,label\\}$"))'
-            upload_url="${upload_url%\{*}"
-            if [[ "$upload_url" != "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets" ]]; then
-              echo 'GitHub Release upload URL did not match the exact release identity' >&2
-              replay_capture "$release_json_path" "$release_error_path" || echo 'release response diagnostics could not be replayed' >&2
-              exit 1
-            fi
-            timeout --signal=TERM --kill-after=5s 120s \
-              gh api --hostname github.com --method POST \
-              --header 'Accept: application/vnd.github+json' \
-              --header 'Content-Type: application/json' \
-              --header 'X-GitHub-Api-Version: 2026-03-10' \
-              --input "$manifest_path" "$upload_url?name=$manifest_name"
-            get_release_by_id "$release_id"
-          fi
-          get_release_by_id "$release_id"
-          check_server_draft "$release_json_path" "$release_id"
-          capture_extract release_asset_id "$release_json_path" "$release_error_path" --arg name "$manifest_name" \
-            '.assets | select(length == 1) | .[0] | select(.name == $name and (.id | type == "number" and . == floor and . > 0)) | .id'
-          draft_dir="$RUNNER_TEMP/draft-release"
-          download_and_compare_manifest "$draft_dir" "$release_asset_id"
-          # Recheck the exact numeric draft immediately before publication.
-          get_release_by_id "$release_id"
-          check_server_draft "$release_json_path" "$release_id"
-          timeout --signal=TERM --kill-after=5s 60s \
-            gh api --hostname github.com --method PATCH \
-            --header 'Accept: application/vnd.github+json' \
-              --header 'X-GitHub-Api-Version: 2026-03-10' \
-              --field draft=false "repos/$GITHUB_REPOSITORY/releases/$release_id"
-          final_release_json_path="$RUNNER_TEMP/final-release.json"
-          get_release_by_id "$release_id"
-          cp -- "$release_json_path" "$final_release_json_path"
-          check_server_release "$final_release_json_path" "$release_id"
-          capture_extract release_asset_id "$final_release_json_path" "$release_error_path" \
-            '.assets[0].id | select(type == "number" and . == floor and . > 0)'
-          final_dir="$RUNNER_TEMP/final-release"
-          download_and_compare_manifest "$final_dir" "$release_asset_id"
-          unset GH_TOKEN
+          gh release create "$GITHUB_REF_NAME" "$manifest_path" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Server State image digest manifest for commit $release_commit." \
+            --target "$release_commit" \
+            --verify-tag
+          .github/scripts/verify-release.sh \
+            "$GITHUB_REF_NAME" "$manifest_name" "$manifest_path"
           verify_registry_digests
-          unset registry_token
+          unset GH_TOKEN registry_token
