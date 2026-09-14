@@ -20,8 +20,8 @@ Environment=SERVER_NAME=${SERVER_NAME}
 Environment=TRUSTED_PROXY=${TRUSTED_PROXY}
 Volume=/home/ubuntu/telecrypt-current/Caddyfile:/etc/caddy/Caddyfile:ro
 Volume=/home/ubuntu/telecrypt-current/caddy:/etc/caddy/caddy:ro
-Tmpfs=/config/caddy:uid=65532,gid=65532,mode=0700
-Tmpfs=/data/caddy:uid=65532,gid=65532,mode=0700
+Tmpfs=/config/caddy:rw,mode=1777
+Tmpfs=/data/caddy:rw,mode=1777
 
 [Service]
 EnvironmentFile=/home/ubuntu/telecrypt-deployment.env

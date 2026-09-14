@@ -25,7 +25,7 @@ Volume=${TELECRYPT_DATA_DIR}/runtime/synapse.identity.yaml:/runtime-identity.yam
 Volume=${TELECRYPT_DATA_DIR}/secrets/synapse.secrets.json:/secrets.json:ro
 Volume=${TELECRYPT_DATA_DIR}/secrets/synapse_signing.key:/signing.key:ro
 Volume=${TELECRYPT_DATA_DIR}/runtime/synapse-staging:/staging:rw
-Tmpfs=/tmp:uid=991,gid=991,mode=1777
+Tmpfs=/tmp:rw,mode=1777
 HealthCmd=["curl","-fSs","http://127.0.0.1:8008/health"]
 HealthInterval=15s
 HealthTimeout=5s
