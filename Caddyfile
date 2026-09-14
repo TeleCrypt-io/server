@@ -21,7 +21,7 @@
 # `auto_https off` stops Caddy from provisioning ANY certificate, opening :443, or doing ACME —
 # it serves the HTTP port only and never exposes a domain via auto-SSL.
 {
-	auto_https off
+	import caddy/global.{$SERVER_NAME}.caddy
 
 	servers {
 		trusted_proxies static {$TRUSTED_PROXY}
@@ -29,7 +29,7 @@
 	}
 
 	servers :8080 {
-		protocols h1
+		import caddy/server.{$SERVER_NAME}.caddy
 	}
 }
 
@@ -45,17 +45,11 @@
 	}
 }
 
-# Keep paths and response details for diagnosis without retaining OAuth or other secret query data.
-# Credential headers and response cookies are excluded as well.
+# Access logging is selected by the exact environment profile. Production filters query and
+# credential data; Stage keeps the complete request/response record for acceptance diagnostics.
 (access_log) {
 	log {
-		format filter {
-			request>uri regexp "[?].*" "?[REDACTED]"
-			request>headers>Authorization delete
-			request>headers>Cookie delete
-			request>headers>Proxy-Authorization delete
-			resp_headers>Set-Cookie delete
-		}
+		import caddy/access-log.{$SERVER_NAME}.caddy
 	}
 }
 
@@ -274,8 +268,7 @@ http://backend.{$SERVER_NAME}:8080 {
 		}
 	}
 	# Cashier has no browser surface. The provider's fixed signed webhook endpoint is the only public
-	# Cashier route. The shared access-log filter removes query data and credential headers while
-	# retaining the request diagnostic.
+	# Cashier route. Access-log detail follows the selected environment profile.
 	@dodo_webhook {
 		method POST
 		path /webhooks/dodo

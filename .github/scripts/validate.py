@@ -254,6 +254,15 @@ MAS_STAGE_LOGIN_VALUES = {
     "per_ip": {"burst": 100000, "per_second": 1000.0},
     "per_account": {"burst": 100000, "per_second": 1000.0},
 }
+CADDY_PROFILES = ("telecrypt.io", "stage.telecrypt.io")
+SYNAPSE_LOG_PROFILE_FILES = {
+    "telecrypt.io": "synapse.telecrypt.io.log.config",
+    "stage.telecrypt.io": "synapse.stage.telecrypt.io.log.config",
+}
+MAS_LOG_PROFILE_VALUES = {
+    "telecrypt.io": "info",
+    "stage.telecrypt.io": "info,mas=debug,async_graphql=debug,reqwest=debug,hyper_util=debug",
+}
 
 
 def synapse_environment_path(server_name: str) -> Path:
@@ -494,7 +503,12 @@ def validate_caddy(caddy: str) -> None:
         "media deletion route order",
     )
     check("http://{$SERVER_NAME}:8080" in caddy and "http://backend.{$SERVER_NAME}:8080" in caddy, "host identities")
-    check(re.search(r"(?ms)^\tservers :8080 \{\n\t\tprotocols h1\n\t\}", caddy) is not None, "cleartext HTTP/1.1 listener")
+    check(
+        "import caddy/global.{$SERVER_NAME}.caddy" in caddy
+        and "import caddy/server.{$SERVER_NAME}.caddy" in caddy
+        and "import caddy/access-log.{$SERVER_NAME}.caddy" in caddy,
+        "environment-selected Caddy logging profiles",
+    )
     sites = re.findall(r"(?ms)^http://[^\n]+ \{.*?^\}", caddy)
     check(len(sites) == 2 and all("import ingress_peer_gate" in site and "import access_log" in site for site in sites), "ingress peer gate/logs")
     check(caddy.count("not remote_ip {$TRUSTED_PROXY}") == 1, "immediate ingress peer matcher")
@@ -526,8 +540,6 @@ def validate_caddy(caddy: str) -> None:
         "Caddy media upload body limit",
     )
     check("path /agents" in caddy and "reverse_proxy registration:9009" in caddy, "Registration boundary")
-    for field in ("request>headers>Authorization", "request>headers>Cookie", "request>headers>Proxy-Authorization", "resp_headers>Set-Cookie"):
-        check(len(re.findall(rf"(?im)^\s*{re.escape(field)}\s+delete\s*$", caddy)) == 1, field)
     check("trusted_proxies_strict" in caddy, "trusted proxy header policy")
     check(caddy.count("header_up -X-Telecrypt-Client-IP") == 1 and not re.search(r"(?im)^\s*header_up\s+X-Telecrypt-Client-IP(?:\s|$)", caddy), "client identity")
     check("log_skip" not in caddy, "Dodo logging")
@@ -593,9 +605,35 @@ def _adapted_untrusted_peer_match(value: object) -> bool:
     )
 
 
-def validate_adapted_caddy(path: Path) -> None:
+def validate_adapted_caddy(path: Path, server_name: str | None = None) -> None:
     document = json.loads(path.read_text(encoding="utf-8"))
     check(isinstance(document, dict), "adapted Caddy document shape")
+    if server_name is not None:
+        check(server_name in CADDY_PROFILES, ("adapted Caddy SERVER_NAME", server_name))
+        logs = document.get("logging", {}).get("logs", {})
+        default_log = logs.get("default", {})
+        access_logs = [value for name, value in logs.items() if name.startswith("log")]
+        servers = list(document.get("apps", {}).get("http", {}).get("servers", {}).values())
+        check(len(servers) == 1, (server_name, "Caddy HTTP server count", len(servers)))
+        server_logs = servers[0].get("logs", {})
+        is_stage = server_name == "stage.telecrypt.io"
+        check(default_log.get("level") == ("DEBUG" if is_stage else None), (server_name, "Caddy debug level", default_log))
+        check(server_logs.get("should_log_credentials", False) is is_stage, (server_name, "Caddy credential logging", server_logs))
+        check(len(access_logs) == 2, (server_name, "Caddy access logger count", len(access_logs)))
+        if is_stage:
+            check(all(item.get("encoder") == {"format": "json"} and "sampling" not in item for item in access_logs), (server_name, "unfiltered unsampled JSON access logs"))
+        else:
+            expected_fields = {
+                "request>uri": {"filter": "regexp", "regexp": "[?].*", "value": "?[REDACTED]"},
+                "request>headers>Authorization": {"filter": "delete"},
+                "request>headers>Cookie": {"filter": "delete"},
+                "request>headers>Proxy-Authorization": {"filter": "delete"},
+                "resp_headers>Set-Cookie": {"filter": "delete"},
+            }
+            check(
+                all(item.get("encoder") == {"format": "filter", "fields": expected_fields} and "sampling" not in item for item in access_logs),
+                (server_name, "Production filtered access logs"),
+            )
     checked = 0
     for routes in _adapted_route_lists(document):
         for index, route in enumerate(routes):
@@ -714,7 +752,7 @@ def _mounts(settings: dict) -> dict[str, dict]:
     return result
 
 
-def validate_rendered(path: Path) -> None:
+def validate_rendered(path: Path, server_name: str | None = None) -> None:
     def pairs(items):
         result = {}
         for key, value in items:
@@ -735,6 +773,10 @@ def validate_rendered(path: Path) -> None:
     )
     env_text = (ROOT / ".env.example").read_text(encoding="utf-8")
     env = assignments(env_text)
+    if server_name is not None:
+        check(server_name in CADDY_PROFILES, ("rendered SERVER_NAME", server_name))
+        env["SERVER_NAME"] = server_name
+        env["BILLING_ENVIRONMENT"] = "live" if server_name == "telecrypt.io" else "test"
     manifest = load_manifest()
     data_dir = os.environ.get("TELECRYPT_DATA_DIR", "")
     check(data_dir, "TELECRYPT_DATA_DIR")
@@ -770,11 +812,15 @@ def validate_rendered(path: Path) -> None:
         runtime.update({"SERVER_NAME": env["SERVER_NAME"]} if service in ("registration", "janitor", "plan", "cashier") else {})
         runtime.update({"BILLING_ENVIRONMENT": env["BILLING_ENVIRONMENT"]} if service in ("janitor", "plan", "cashier") else {})
         actual_env = _env_map(settings.get("environment", {}))
-        check(set(actual_env) == SERVICE_ENV_KEYS[service], (service, "environment keys"))
+        if service == "mas":
+            expected_mas_env = {"RUST_LOG": MAS_LOG_PROFILE_VALUES[env["SERVER_NAME"]]}
+            check(actual_env == expected_mas_env, (service, "environment profile", actual_env))
+        else:
+            check(set(actual_env) == SERVICE_ENV_KEYS[service], (service, "environment keys"))
+            check("env_file" not in settings, (service, "live env files"))
         for key, value in runtime.items():
             check(actual_env.get(key) == value, (service, key))
         check(not set(actual_env) & set(SECRET_ENV.values()), (service, "secret environment"))
-        check("env_file" not in settings, (service, "live env files"))
         check(settings.get("tmpfs", []) == EXPECTED_TMPFS.get(service, []), (service, "tmpfs"))
         expected_healthcheck = EXPECTED_HEALTHCHECKS.get(service)
         if expected_healthcheck is None:
@@ -839,12 +885,15 @@ def validate_rendered(path: Path) -> None:
     for service in ("registration", "janitor", "plan", "cashier"):
         check(not services[service].get("volumes"), (service, "volume isolation"))
     expected_mounts = {
-        "caddy": {"/etc/caddy/Caddyfile": (str(ROOT / "Caddyfile"), True)},
+        "caddy": {
+            "/etc/caddy/Caddyfile": (str(ROOT / "Caddyfile"), True),
+            "/etc/caddy/caddy": (str(ROOT / "caddy"), True),
+        },
         "synapse": {
             "/homeserver.yaml": (str(ROOT / "synapse.yaml"), True),
             "/synapse-environment.yaml": (str(synapse_environment_path(env["SERVER_NAME"])), True),
             "/runtime-identity.yaml": (f"{data_dir}/runtime/synapse.identity.yaml", True),
-            "/log.config": (str(ROOT / "synapse.log.config"), True),
+            "/log.config": (str(ROOT / SYNAPSE_LOG_PROFILE_FILES[env["SERVER_NAME"]]), True),
             "/staging": (f"{data_dir}/runtime/synapse-staging", False),
         },
         "mas": {
@@ -1230,10 +1279,10 @@ def main() -> None:
         validate_source(values)
     elif args.command == "rendered-compose":
         check(args.path is not None, "rendered Compose JSON path required")
-        validate_rendered(args.path)
+        validate_rendered(args.path, args.value)
     elif args.command == "adapted-caddy":
         check(args.path is not None, "adapted Caddy JSON path required")
-        validate_adapted_caddy(args.path)
+        validate_adapted_caddy(args.path, args.value)
     elif args.command == "image-list":
         check(args.path is not None, "image list path required")
         validate_image_list(args.path)

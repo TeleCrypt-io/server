@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import os
 import json
+import logging
+import logging.config
 import re
 import shlex
 import subprocess
@@ -68,6 +70,19 @@ class ManifestTests(unittest.TestCase):
         for profile in (("stage.telecrypt.io", "live"), ("other.telecrypt.io", "test"), ("telecrypt.io", "sandbox")):
             with self.assertRaises(AssertionError):
                 validate.validate_profile({"SERVER_NAME": profile[0], "BILLING_ENVIRONMENT": profile[1]})
+
+    def test_synapse_logging_profiles_keep_production_at_info(self) -> None:
+        for server_name in validate.CADDY_PROFILES:
+            with self.subTest(server_name=server_name):
+                log_path = validate.ROOT / validate.SYNAPSE_LOG_PROFILE_FILES[server_name]
+                config = yaml.safe_load(log_path.read_text(encoding="utf-8"))
+                logging.config.dictConfig(config)
+                self.assertEqual(logging.getLogger().getEffectiveLevel(), logging.INFO)
+                self.assertEqual(logging.getLogger("synapse.storage.SQL").getEffectiveLevel(), logging.INFO)
+                expected_http_level = logging.DEBUG if server_name == "stage.telecrypt.io" else logging.INFO
+                for logger_name in ("synapse.http.server", "synapse.http.client"):
+                    self.assertEqual(logging.getLogger(logger_name).getEffectiveLevel(), expected_http_level)
+
     def test_synapse_prejoin_state_is_narrow_and_covers_nested_folders(self) -> None:
         root = Path(__file__).resolve().parents[2]
         synapse = (root / "synapse.yaml").read_text(encoding="utf-8")

@@ -23,9 +23,9 @@ repository's deployment composition and release contract.
 environment, derived backend and public-site hostnames, ingress binding, identity overlays, and
 secret-file contract are maintained by the operator's private Harness. Compose reads the prepared
 operator, service-private, and image-version files through its native command-line `--env-file`
-interface. The service definitions have no `env_file` entries; they explicitly select each
-container's environment keys. The committed `.env.example` contains TEST-NET documentation values
-only; replace them through the private
+interface. Service environment is explicit except MAS's single nonsecret `RUST_LOG` value, loaded
+from its exact `SERVER_NAME`-selected profile file. The committed `.env.example` contains TEST-NET
+documentation values only; replace them through the private
 deployment procedure before activation.
 
 The Matrix private inputs are `${TELECRYPT_DATA_DIR}/secrets/synapse.secrets.json`,
@@ -54,6 +54,11 @@ to the buckets that the acceptance flow exercises; email, recovery, and policy d
 schema while keeping the test profile unsafely fast. The final runtime identity layer supplies the
 shared Plan/Janitor admin-client ID. The committed base configs retain reviewed nonsecret loader
 options, while credentials, database URIs, OAuth client secrets, and provider values remain outside this repository.
+Logging uses the same exact environment selection. Production keeps MAS at INFO and keeps its current
+Synapse and filtered Caddy access logs. Stage raises MAS and Synapse HTTP client/server logging to
+DEBUG while keeping Synapse root and SQL logging at INFO. Stage Caddy also enables debug and
+credential logging and writes unsampled, unfiltered JSON access records, including complete request
+and response headers and query strings. The Caddy routes are shared across both profiles.
 Janitor runs real lock sweeps in both the isolated test profiles and the live profile; it has no
 dry-run mode. Each profile uses its own exact MAS deployment, database, and deployment-identity
 binding. A payment concurrent with a lock may leave a paid member locked; the accepted recovery

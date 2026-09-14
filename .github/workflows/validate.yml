@@ -120,15 +120,22 @@ jobs:
           install -m 444 .github/fixtures/synapse.secrets.json "$fixture_secrets/synapse.secrets.json"
           install -m 444 .github/fixtures/synapse-signing-fixture.txt "$fixture_secrets/synapse_signing.key"
           install -m 444 .github/fixtures/mas.secrets.json "$fixture_secrets/mas.secrets.json"
-          rendered_compose="$RUNNER_TEMP/server-state-compose.json"
+          rendered_compose="$RUNNER_TEMP/server-state-compose-stage.json"
           container_command --sensitive "$rendered_compose" 120 \
             docker compose --profile janitor --env-file .env.example config --format json
           rm -f -- "$rendered_compose.stderr"
-          printf 'COMPOSE_RENDERED_JSON=%s\n' "$rendered_compose" >> "$GITHUB_ENV"
+          rendered_production="$RUNNER_TEMP/server-state-compose-production.json"
+          container_command --sensitive "$rendered_production" 120 \
+            env SERVER_NAME=telecrypt.io BILLING_ENVIRONMENT=live docker compose --profile janitor \
+            --env-file .env.example config --format json
+          rm -f -- "$rendered_production.stderr"
+          printf 'COMPOSE_RENDERED_JSON_STAGE=%s\n' "$rendered_compose" >> "$GITHUB_ENV"
+          printf 'COMPOSE_RENDERED_JSON_PRODUCTION=%s\n' "$rendered_production" >> "$GITHUB_ENV"
 
       - name: Verify rendered Compose closed contracts
         run: |
-          python3 .github/scripts/validate.py rendered-compose "$COMPOSE_RENDERED_JSON"
+          python3 .github/scripts/validate.py rendered-compose "$COMPOSE_RENDERED_JSON_STAGE" stage.telecrypt.io
+          python3 .github/scripts/validate.py rendered-compose "$COMPOSE_RENDERED_JSON_PRODUCTION" telecrypt.io
 
       - name: Verify UID-991 secret runtime contract
         run: |
@@ -498,37 +505,41 @@ jobs:
           rm -f -- "$image_list.stderr"
           caddy_image="$(awk '/docker.io\/caddy:/ { print; exit }' "$image_list")"
           test -n "$caddy_image"
-          caddy_validation="$RUNNER_TEMP/caddy-validation"
-          container_command --sensitive "$caddy_validation" 120 docker run --rm \
-            --user 65532:65532 \
-            --read-only \
-            --security-opt no-new-privileges=true \
-            --cap-drop ALL \
-            --cap-add NET_BIND_SERVICE \
-            --network none \
-            --tmpfs /config/caddy:uid=65532,gid=65532,mode=0700 \
-            --tmpfs /data/caddy:uid=65532,gid=65532,mode=0700 \
-            --env TRUSTED_PROXY=192.0.2.10/32 \
-            --env SERVER_NAME=example.invalid \
-            --volume "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
-            "$caddy_image" caddy validate --config /etc/caddy/Caddyfile
-          rm -f -- "$caddy_validation.stderr"
-          caddy_adapted="$RUNNER_TEMP/caddy-adapted.json"
-          container_command --sensitive "$caddy_adapted" 120 docker run --rm \
-            --user 65532:65532 \
-            --read-only \
-            --security-opt no-new-privileges=true \
-            --cap-drop ALL \
-            --cap-add NET_BIND_SERVICE \
-            --network none \
-            --tmpfs /config/caddy:uid=65532,gid=65532,mode=0700 \
-            --tmpfs /data/caddy:uid=65532,gid=65532,mode=0700 \
-            --env TRUSTED_PROXY=192.0.2.10/32 \
-            --env SERVER_NAME=example.invalid \
-            --volume "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
-            "$caddy_image" caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile --pretty
-          rm -f -- "$caddy_adapted.stderr"
-          python3 .github/scripts/validate.py adapted-caddy "$caddy_adapted"
+          for server_name in telecrypt.io stage.telecrypt.io; do
+            caddy_validation="$RUNNER_TEMP/caddy-validation-$server_name"
+            container_command --sensitive "$caddy_validation" 120 docker run --rm \
+              --user 65532:65532 \
+              --read-only \
+              --security-opt no-new-privileges=true \
+              --cap-drop ALL \
+              --cap-add NET_BIND_SERVICE \
+              --network none \
+              --tmpfs /config/caddy:uid=65532,gid=65532,mode=0700 \
+              --tmpfs /data/caddy:uid=65532,gid=65532,mode=0700 \
+              --env TRUSTED_PROXY=192.0.2.10/32 \
+              --env SERVER_NAME="$server_name" \
+              --volume "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+              --volume "$PWD/caddy:/etc/caddy/caddy:ro" \
+              "$caddy_image" caddy validate --config /etc/caddy/Caddyfile
+            rm -f -- "$caddy_validation.stderr"
+            caddy_adapted="$RUNNER_TEMP/caddy-adapted-$server_name.json"
+            container_command --sensitive "$caddy_adapted" 120 docker run --rm \
+              --user 65532:65532 \
+              --read-only \
+              --security-opt no-new-privileges=true \
+              --cap-drop ALL \
+              --cap-add NET_BIND_SERVICE \
+              --network none \
+              --tmpfs /config/caddy:uid=65532,gid=65532,mode=0700 \
+              --tmpfs /data/caddy:uid=65532,gid=65532,mode=0700 \
+              --env TRUSTED_PROXY=192.0.2.10/32 \
+              --env SERVER_NAME="$server_name" \
+              --volume "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+              --volume "$PWD/caddy:/etc/caddy/caddy:ro" \
+              "$caddy_image" caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile --pretty
+            rm -f -- "$caddy_adapted.stderr"
+            python3 .github/scripts/validate.py adapted-caddy "$caddy_adapted" "$server_name"
+          done
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/server-state-')

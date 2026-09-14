@@ -1,0 +1,2 @@
+# Production keeps Caddy's existing HTTP-only listener behavior.
+auto_https off

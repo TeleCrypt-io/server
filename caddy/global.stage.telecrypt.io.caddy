@@ -1,0 +1,3 @@
+# Stage keeps the HTTP-only listener and enables Caddy's diagnostic debug logs.
+auto_https off
+debug

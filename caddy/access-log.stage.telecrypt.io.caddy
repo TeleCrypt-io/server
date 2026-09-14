@@ -1,0 +1,2 @@
+# Stage captures JSON access records without filtering or sampling.
+format json

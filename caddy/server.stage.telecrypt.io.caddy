@@ -1,0 +1,3 @@
+# Stage records credential headers in access logs for complete failure diagnosis.
+protocols h1
+log_credentials
