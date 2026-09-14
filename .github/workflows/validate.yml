@@ -51,7 +51,7 @@ jobs:
           printf '%s' "$GITHUB_TOKEN" | podman login --authfile "$authfile" \
             --username "$GITHUB_ACTOR" --password-stdin ghcr.io
           while IFS='=' read -r key image; do
-            podman manifest inspect --authfile "$authfile" "$image" >/dev/null
+            skopeo inspect --authfile "$authfile" "docker://$image" >/dev/null
           done < versions.env
 
       - name: Verify selected annotated release identity
