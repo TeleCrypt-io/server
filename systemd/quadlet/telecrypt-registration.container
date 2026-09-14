@@ -1,0 +1,23 @@
+[Unit]
+Description=TeleCrypt Registration
+Requires=telecrypt-pod.service
+Requires=telecrypt-mas.service
+After=telecrypt-pod.service telecrypt-mas.service
+PartOf=telecrypt.target
+
+[Container]
+ContainerName=telecrypt-registration
+Image=${CONTROLPLANE_IMAGE}
+PodmanArgs=--pod=telecrypt
+PodmanArgs=--security-opt=no-new-privileges
+Pull=never
+User=991:991
+ReadOnly=true
+DropCapability=ALL
+Environment=SERVER_NAME=${SERVER_NAME}
+
+[Service]
+EnvironmentFile=/home/ubuntu/telecrypt-deployment.env
+EnvironmentFile=/home/ubuntu/telecrypt-current/versions.env
+Restart=always
+RestartSec=2

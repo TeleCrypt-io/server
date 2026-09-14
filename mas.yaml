@@ -5,7 +5,7 @@
 # which remains last so private configuration cannot replace public identity.
 #
 # The Harness writes http.public_base, http.issuer, and
-# experimental.plan_management_iframe_uri to the runtime identity layer before Compose validation.
+# experimental.plan_management_iframe_uri to the runtime identity layer before activation.
 # The private overlay contains secrets plus the environment-bound database and client identities.
 # MAS's client list is kept in one layer because Figment concatenates arrays during admerge; its
 # nonsecret auth method and redirect choices therefore stay beside those client secrets.
@@ -21,10 +21,8 @@ http:
         - name: graphql
         - name: assets
       binds:
-        # Use MAS's official IPv4 wildcard socket address; network attachment and Caddy routing
-        # provide the reachability boundary for this listener without requiring IPv6 in the
-        # container namespace.
-        - address: '0.0.0.0:8080'
+        # Caddy and applications reach MAS through the shared pod's loopback interface.
+        - address: '127.0.0.1:8082'
       proxy_protocol: false
 
     - name: internal
@@ -32,17 +30,15 @@ http:
         - name: adminapi       # REST admin API; authorization remains enforced by MAS
         - name: oauth          # Plan/Janitor client-credentials token endpoint; no public route
       binds:
-        # The admin API and client-credentials token endpoint are credential-gated by MAS. Docker networks
-        # are their only transport paths: there is no host publication and Caddy has no private
-        # route. Bind only to MAS's static address on mas_admin_net; that network is shared only
-        # with Plan and Janitor.
-        - address: '192.168.254.2:8081'
+        # This listener serves the MAS admin API and client-credentials token endpoint. MAS enforces
+        # authorization; Plan and Janitor use it inside the shared pod. It has no host publication or
+        # public Caddy route.
+        - address: '127.0.0.1:8081'
       proxy_protocol: false
 
-  # Harness supplies public_base and issuer in the final identity layer; forwarded scheme/host do
-  # not require MAS to trust client-selected X-Forwarded-For. An explicit empty list is required:
-  # omitting this key restores MAS's private-range defaults. MAS therefore records the Caddy peer
-  # for IP-based rate limiting/logging instead of accepting a spoofable header from any app peer.
+  # Harness supplies public_base and issuer in the final identity layer. MAS uses the immediate
+  # transport peer for IP-based rate limiting/logging and does not trust forwarded client-IP values
+  # from Caddy or other services in the shared pod.
   trusted_proxies: []
 
 # secrets:         -> in mas.secrets.json (encryption + signing keys)
@@ -51,7 +47,7 @@ http:
 
 matrix:
   kind: synapse
-  endpoint: http://synapse:8008
+  endpoint: http://127.0.0.1:8008
 
 # MAS-managed passwords are accepted only by MAS's hosted OAuth human pages (for
 # registration and reauthentication). Email password recovery is currently unavailable because

@@ -1,0 +1,30 @@
+[Unit]
+Description=TeleCrypt Caddy
+Requires=telecrypt-pod.service
+Requires=telecrypt-mas.service
+Requires=telecrypt-synapse.service
+After=telecrypt-pod.service telecrypt-mas.service telecrypt-synapse.service
+PartOf=telecrypt.target
+
+[Container]
+ContainerName=telecrypt-caddy
+Image=${CADDY_IMAGE}
+PodmanArgs=--pod=telecrypt
+PodmanArgs=--security-opt=no-new-privileges
+Pull=never
+User=65532:65532
+ReadOnly=true
+DropCapability=ALL
+AddCapability=NET_BIND_SERVICE
+Environment=SERVER_NAME=${SERVER_NAME}
+Environment=TRUSTED_PROXY=${TRUSTED_PROXY}
+Volume=/home/ubuntu/telecrypt-current/Caddyfile:/etc/caddy/Caddyfile:ro
+Volume=/home/ubuntu/telecrypt-current/caddy:/etc/caddy/caddy:ro
+Tmpfs=/config/caddy:uid=65532,gid=65532,mode=0700
+Tmpfs=/data/caddy:uid=65532,gid=65532,mode=0700
+
+[Service]
+EnvironmentFile=/home/ubuntu/telecrypt-deployment.env
+EnvironmentFile=/home/ubuntu/telecrypt-current/versions.env
+Restart=always
+RestartSec=2

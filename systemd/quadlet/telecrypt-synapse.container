@@ -1,0 +1,39 @@
+[Unit]
+Description=TeleCrypt Synapse
+Requires=telecrypt-pod.service
+Requires=telecrypt-mas.service
+After=telecrypt-pod.service telecrypt-mas.service
+PartOf=telecrypt.target
+
+[Container]
+ContainerName=telecrypt-synapse
+Image=${SYNAPSE_IMAGE}
+PodmanArgs=--pod=telecrypt
+PodmanArgs=--security-opt=no-new-privileges
+PodmanArgs=--entrypoint=/telecrypt-synapse-entrypoint
+PodmanArgs=--sdnotify=healthy
+Pull=never
+Exec=-c /homeserver.yaml -c /synapse-environment.yaml -c /secrets.json -c /runtime-identity.yaml
+User=991:991
+ReadOnly=true
+DropCapability=ALL
+Environment=TMPDIR=/staging/tmp
+Volume=/home/ubuntu/telecrypt-current/synapse.yaml:/homeserver.yaml:ro
+Volume=/home/ubuntu/telecrypt-current/synapse.${SERVER_NAME}.yaml:/synapse-environment.yaml:ro
+Volume=/home/ubuntu/telecrypt-current/synapse.${SERVER_NAME}.log.config:/log.config:ro
+Volume=${TELECRYPT_DATA_DIR}/runtime/synapse.identity.yaml:/runtime-identity.yaml:ro
+Volume=${TELECRYPT_DATA_DIR}/secrets/synapse.secrets.json:/secrets.json:ro
+Volume=${TELECRYPT_DATA_DIR}/secrets/synapse_signing.key:/signing.key:ro
+Volume=${TELECRYPT_DATA_DIR}/runtime/synapse-staging:/staging:rw
+Tmpfs=/tmp:uid=991,gid=991,mode=1777
+HealthCmd=["curl","-fSs","http://127.0.0.1:8008/health"]
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=15s
+
+[Service]
+EnvironmentFile=/home/ubuntu/telecrypt-deployment.env
+EnvironmentFile=/home/ubuntu/telecrypt-current/versions.env
+Restart=always
+RestartSec=2

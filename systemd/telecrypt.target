@@ -1,0 +1,13 @@
+[Unit]
+Description=TeleCrypt application stack
+Requires=telecrypt-pod.service
+Requires=telecrypt-caddy.service
+Requires=telecrypt-mas.service
+Requires=telecrypt-synapse.service
+Requires=telecrypt-registration.service
+Requires=telecrypt-plan.service
+Requires=telecrypt-cashier.service
+After=telecrypt-pod.service
+
+[Install]
+WantedBy=default.target

@@ -4,18 +4,16 @@
 # site prefixes disable Caddy's automatic HTTPS so it serves on the HTTP port only.
 #
 # Requirements:
-#   - Compose places Caddy on one dedicated internal edge network per routed upstream; it has no
-#     network path to Janitor or MAS's private admin listener.
-#   - It listens on unprivileged container port 8080; Compose maps the proxy-facing host port to it.
+#   - Caddy and the application services share the rootless Podman pod network namespace; internal
+#     HTTP upstreams use their assigned 127.0.0.1 ports.
+#   - It listens on unprivileged pod port 8080; host ingress publishes this Caddy port.
 #   - The upstream proxy MUST send `X-Forwarded-Proto: https` (so MAS/Synapse build https URLs and
 #     set Secure cookies).
 #   - `TRUSTED_PROXY` must be exactly one TLS-terminator host address (/32 or /128). Caddy uses it
 #     to trust only that proxy's forwarded protocol and client context; application identity and
 #     rate limiting do not depend on a forwarded client-IP header.
-#   - For rootless Docker, this peer gate is activation-valid only with RootlessKit >= 3.0's
-#     `slirp4netns` port driver and userland-proxy disabled. Harness must verify those
-#     exact host conditions and prove the observed peer/X-Forwarded behavior live; other publish paths
-#     do not satisfy this boundary.
+#   - The pasta host-publish path must preserve the TLS terminator's transport address for Caddy's
+#     immediate-peer check; forwarded headers do not determine that peer.
 
 # TLS / auto-HTTPS is FULLY disabled: HAProxy terminates TLS and forwards plain HTTP here.
 # `auto_https off` stops Caddy from provisioning ANY certificate, opening :443, or doing ACME —
@@ -60,9 +58,8 @@
 }
 
 # Caddy must be reachable only from the configured TLS terminator. `remote_ip` is the immediate
-# transport peer and is deliberately independent of forwarded-client-IP trust. The Docker/rootless
-# host publish path must preserve the configured proxy peer; the external terminator cannot do that
-# after the request crosses the host boundary. See the RootlessKit/userland-proxy prerequisite above.
+# transport peer and is deliberately independent of forwarded-client-IP trust. The pasta host-publish
+# path must preserve that peer address.
 (ingress_peer_gate) {
 	@untrusted_ingress_peer {
 		not remote_ip {$TRUSTED_PROXY}
@@ -125,8 +122,7 @@ http://backend.{$SERVER_NAME}:8080 {
 	import access_log
 	import security_headers
 
-	# Administrative APIs are available only over private application networks. Browsers and Internet
-	# clients must not reach these paths.
+	# MAS administrative APIs are not part of the public Caddy surface.
 	@mas_admin path /auth/api/admin /auth/api/admin/*
 	handle @mas_admin {
 		respond "Not Found" 404
@@ -135,7 +131,7 @@ http://backend.{$SERVER_NAME}:8080 {
 	handle @synapse_admin {
 		respond "Not Found" 404
 	}
-	# Cashier's command API is private Docker-network traffic only. Do not forward this public path.
+	# Cashier's command API is for internal application calls, not the public Caddy surface.
 	@cashier_internal path /internal /internal/*
 	handle @cashier_internal {
 		respond "Not Found" 404
@@ -163,7 +159,7 @@ http://backend.{$SERVER_NAME}:8080 {
 		path_regexp ^/_matrix/client/[^/]+/(logout|refresh)/?$
 	}
 	handle @mas_compat {
-		reverse_proxy mas:8080 {
+		reverse_proxy 127.0.0.1:8082 {
 			import strip_untrusted_client_ip
 		}
 	}
@@ -178,7 +174,7 @@ http://backend.{$SERVER_NAME}:8080 {
 		request_body {
 			max_size 128MiB
 		}
-		reverse_proxy synapse:8008 {
+		reverse_proxy 127.0.0.1:8008 {
 			import strip_untrusted_client_ip
 		}
 	}
@@ -188,7 +184,7 @@ http://backend.{$SERVER_NAME}:8080 {
 	@mas path /auth /auth/*
 	handle @mas {
 		uri strip_prefix /auth
-		reverse_proxy mas:8080 {
+		reverse_proxy 127.0.0.1:8082 {
 			import strip_untrusted_client_ip
 		}
 	}
@@ -226,7 +222,7 @@ http://backend.{$SERVER_NAME}:8080 {
 		path /_matrix/client/unstable/io.telecrypt.storage/delete_media
 	}
 	handle @telecrypt_delete_media {
-		reverse_proxy synapse:8008 {
+		reverse_proxy 127.0.0.1:8008 {
 			import strip_untrusted_client_ip
 		}
 	}
@@ -235,7 +231,7 @@ http://backend.{$SERVER_NAME}:8080 {
 	# deliberately excluded: see the admin block above and the listener resources in synapse.yaml.
 	@synapse path_regexp ^/_matrix/(client|media)(/|$)
 	handle @synapse {
-		reverse_proxy synapse:8008 {
+		reverse_proxy 127.0.0.1:8008 {
 			import strip_untrusted_client_ip
 		}
 	}
@@ -246,7 +242,7 @@ http://backend.{$SERVER_NAME}:8080 {
 		path /agents
 	}
 	handle @agents_post {
-		reverse_proxy registration:9009 {
+		reverse_proxy 127.0.0.1:9009 {
 			import strip_untrusted_client_ip
 		}
 	}
@@ -263,7 +259,7 @@ http://backend.{$SERVER_NAME}:8080 {
 	# on the provider-hosted checkout.
 	@plan path /plan /plan/* /api/plan /api/plan/*
 	handle @plan {
-		reverse_proxy plan:9012 {
+		reverse_proxy 127.0.0.1:9012 {
 			import strip_untrusted_client_ip
 		}
 	}
@@ -275,7 +271,7 @@ http://backend.{$SERVER_NAME}:8080 {
 	}
 	handle @dodo_webhook {
 		header Cache-Control "no-store"
-		reverse_proxy cashier:9011 {
+		reverse_proxy 127.0.0.1:9011 {
 			import strip_untrusted_client_ip
 		}
 	}

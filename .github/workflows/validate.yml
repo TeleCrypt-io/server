@@ -20,63 +20,39 @@ jobs:
     outputs:
       release_commit: ${{ steps.release_identity.outputs.release_commit }}
       annotated_tag_sha: ${{ steps.release_identity.outputs.annotated_tag_sha }}
-    env:
-      TELECRYPT_DATA_DIR: /tmp/telecrypt-data
-      BILLING_ENVIRONMENT: test
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Load canonical image manifest
+      - name: Validate exact image manifest
+        run: python3 .github/scripts/validate.py manifest
+
+      - name: Test image and release contracts
+        run: python3 .github/scripts/test_validate.py
+
+      - name: Parse Quadlet with Stage Podman
         run: |
           set -euo pipefail
-          python3 .github/scripts/validate.py source
+          test "$(podman --version)" = "podman version 4.9.3"
+          QUADLET_UNIT_DIRS="$GITHUB_WORKSPACE/systemd/quadlet" \
+            /usr/lib/systemd/user-generators/podman-user-generator --dryrun --no-kmsg-log \
+            > "$RUNNER_TEMP/server-state-generated-units"
+          test -s "$RUNNER_TEMP/server-state-generated-units"
 
-      - name: Test published-image provenance contract
+      - name: Check exact image manifest availability
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          python3 .github/scripts/test_validate.py
-
-      - name: Require deterministic-egress toolchain
-        run: |
-          set -euo pipefail
-          source .github/scripts/container-helpers.sh
-          engine_version="$(container_command "$RUNNER_TEMP/engine-version" 60 docker version --format '{{.Server.Version}}' | tr -d '\r\n')"
-          compose_version="$(container_command "$RUNNER_TEMP/compose-version" 60 docker compose version --short | tr -d '\r\n')"
-          python3 .github/scripts/validate.py toolchain "$engine_version" "$compose_version"
-
-      - name: Authenticate package registry for exact manifest checks
-        uses: docker/login-action@v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Require every exact image manifest before Compose pulls
-        run: |
-          set -euo pipefail
-          source .github/scripts/container-helpers.sh
-          images_file="$RUNNER_TEMP/server-state-images"
-          failures_file="$RUNNER_TEMP/server-state-image-failures"
-          awk -F= 'NF == 2 { print $2 }' versions.env >"$images_file"
-          test "$(wc -l <"$images_file")" -eq 5
-          : >"$failures_file"
-          while IFS= read -r image; do
-            [ -n "$image" ] || continue
-            inspection_file="$RUNNER_TEMP/server-state-image-inspection"
-            if ! container_command "$inspection_file" 60 \
-              docker manifest inspect "$image"; then
-              printf '%s\n' "$image" >>"$failures_file"
-              printf 'image manifest unavailable: %s\n' "$image" >&2
-            fi
-          done <"$images_file"
-          if [ -s "$failures_file" ]; then
-            echo 'one or more exact image manifests are unavailable; no Compose pull was attempted' >&2
-            cat "$failures_file" >&2
-            exit 1
-          fi
+          authfile="$RUNNER_TEMP/server-state-podman-auth.json"
+          trap 'rm -f -- "$authfile"' EXIT
+          printf '%s' "$GITHUB_TOKEN" | podman login --authfile "$authfile" \
+            --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+          while IFS='=' read -r key image; do
+            podman manifest inspect --authfile "$authfile" "$image" >/dev/null
+          done < versions.env
 
       - name: Verify selected annotated release identity
         id: release_identity
@@ -94,452 +70,8 @@ jobs:
           timeout --signal=TERM --kill-after=5s 30s git fetch --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
           git merge-base --is-ancestor "$release_commit" refs/remotes/origin/main
-          printf 'release_commit=%s\n' "$release_commit" >>"$GITHUB_OUTPUT"
-          printf 'annotated_tag_sha=%s\n' "$(git rev-parse "$release_tag_ref")" >>"$GITHUB_OUTPUT"
-
-      - name: Validate Compose
-        run: |
-          set -euo pipefail
-          source .github/scripts/container-helpers.sh
-          # Nonsecret CI placeholders satisfy Compose's required interpolation. Harness supplies
-          # the snapshotted private values on the authorized deployment path.
-          private_keys=(
-            MAS_ADMIN_CLIENT_ID MAS_ADMIN_CLIENT_SECRET JANITOR_DB_URL OWNER_EMAIL
-            SMTP_HOST SMTP_USERNAME SMTP_PASSWORD SMTP_FROM
-            MAS_OIDC_CLIENT_ID MAS_OIDC_CLIENT_SECRET PLAN_SESSION_KEY PLAN_ASSERTION_PRIVATE_KEY
-            SYNAPSE_ADMIN_TOKEN CASHIER_DB_URL DODO_API_KEY DODO_WEBHOOK_SECRET DODO_PRODUCT_ID
-            PLAN_ASSERTION_PUBLIC_KEY
-          )
-          for key in "${private_keys[@]}"; do
-            printf '%s=ci-compose-fixture\n' "$key" >> "$GITHUB_ENV"
-            export "$key=ci-compose-fixture"
-          done
-          mkdir -p "$TELECRYPT_DATA_DIR"
-          fixture_secrets="$TELECRYPT_DATA_DIR/secrets"
-          install -d -m 700 "$fixture_secrets"
-          install -m 444 .github/fixtures/synapse.secrets.json "$fixture_secrets/synapse.secrets.json"
-          install -m 444 .github/fixtures/synapse-signing-fixture.txt "$fixture_secrets/synapse_signing.key"
-          install -m 444 .github/fixtures/mas.secrets.json "$fixture_secrets/mas.secrets.json"
-          rendered_compose="$RUNNER_TEMP/server-state-compose-stage.json"
-          container_command --sensitive "$rendered_compose" 120 \
-            docker compose --profile janitor --env-file .env.example config --format json
-          rm -f -- "$rendered_compose.stderr"
-          rendered_production="$RUNNER_TEMP/server-state-compose-production.json"
-          container_command --sensitive "$rendered_production" 120 \
-            env SERVER_NAME=telecrypt.io BILLING_ENVIRONMENT=live docker compose --profile janitor \
-            --env-file .env.example config --format json
-          rm -f -- "$rendered_production.stderr"
-          printf 'COMPOSE_RENDERED_JSON_STAGE=%s\n' "$rendered_compose" >> "$GITHUB_ENV"
-          printf 'COMPOSE_RENDERED_JSON_PRODUCTION=%s\n' "$rendered_production" >> "$GITHUB_ENV"
-
-      - name: Verify rendered Compose closed contracts
-        run: |
-          python3 .github/scripts/validate.py rendered-compose "$COMPOSE_RENDERED_JSON_STAGE" stage.telecrypt.io
-          python3 .github/scripts/validate.py rendered-compose "$COMPOSE_RENDERED_JSON_PRODUCTION" telecrypt.io
-
-      - name: Verify UID-991 secret runtime contract
-        run: |
-          set -euo pipefail
-          source .github/scripts/container-helpers.sh
-          synapse_output="$RUNNER_TEMP/synapse-secret-proof.log"
-          if container_command --sensitive "$synapse_output" 120 docker compose --ansi never --env-file .env.example \
-            -f .github/secret-proof.compose.yml run --rm --no-deps -T \
-            --entrypoint python synapse-secret-proof -c '
-          import os
-          import json
-          from pathlib import Path
-
-          expected_json_keys = {"database", "matrix_authentication_service", "media_storage_providers", "macaroon_secret_key", "form_secret"}
-          expected = {"/signing.key": "ed25519 0 AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\n"}
-          signing_key_material = expected["/signing.key"].split()[2]
-          def fail(status, marker):
-              print(f"telecrypt-synapse-proof:{marker}", flush=True)
-              raise SystemExit(status)
-
-          if os.getuid() != 991:
-              fail(70, "uid")
-          for path, value in expected.items():
-              mounted = Path(path)
-              try:
-                  content = mounted.read_text(encoding="utf-8")
-              except (OSError, UnicodeError):
-                  fail(71, "mount-content")
-              if content != value:
-                  fail(71, "mount-content")
-          try:
-              synapse_json = json.loads(Path("/secrets.json").read_text(encoding="utf-8"))
-          except (OSError, UnicodeError, ValueError):
-              fail(72, "secrets-json")
-          if not isinstance(synapse_json, dict) or set(synapse_json) != expected_json_keys:
-              fail(72, "secrets-json")
-          for forbidden in ("/mas-secrets.json", "/run/secrets/mas_secrets_json"):
-              try:
-                  Path(forbidden).lstat()
-              except FileNotFoundError:
-                  continue
-              except OSError:
-                  fail(73, "forbidden-mount")
-              fail(73, "forbidden-mount")
-          environment = os.environ
-          for variable in ("SYNAPSE_SECRETS_JSON", "SYNAPSE_SIGNING_KEY", "MAS_SECRETS_JSON"):
-              if variable in environment:
-                  fail(74, "environment-leak")
-          for value in set(expected.values()) | {signing_key_material, "ci-mas-secret-fixture"}:
-              if value in environment.values():
-                  fail(74, "environment-leak")
-          print("telecrypt-synapse-proof:success", flush=True)
-          '; then
-            proof_status=0
-          else
-            proof_status=$?
-          fi
-          proof_class="$(container_sensitive_proof_class "$proof_status" "$synapse_output" "$synapse_output.stderr")"
-          if [[ "$proof_class" != success ]]; then
-            rm -f -- "$synapse_output" "$synapse_output.stderr"
-            printf 'Synapse secret proof failed: %s\n' "$proof_class" >&2
-            exit 1
-          fi
-          rm -f -- "$synapse_output" "$synapse_output.stderr"
-          echo 'uid-991 secret mount readable with only Synapse grants'
-
-      # The pinned MAS image is distroless; use its bundled mas-cli directly rather than assuming
-      # a shell or Python diagnostic exists. Capture config output so fixture values never reach CI logs.
-      - name: Verify UID-991 MAS secret isolation
-        run: |
-          set -euo pipefail
-          source .github/scripts/container-helpers.sh
-          mkdir -p "$TELECRYPT_DATA_DIR/runtime"
-          cat > "$TELECRYPT_DATA_DIR/runtime/mas.identity.yaml" <<'EOF'
-          http:
-            public_base: https://backend.stage.telecrypt.io/auth/
-            issuer: https://backend.stage.telecrypt.io/auth/
-          experimental:
-            plan_management_iframe_uri: https://backend.stage.telecrypt.io/plan
-          policy:
-            data:
-              admin_clients:
-                - 01ARZ3NDEKTSV4RRFFQ69G5FAW
-          EOF
-
-          mas_container=ci-mas-secret-proof
-          mas_output="$RUNNER_TEMP/mas-secret-proof.log"
-          mas_user_output="$RUNNER_TEMP/mas-user"
-          mas_mounts="$RUNNER_TEMP/mas-secret-mounts.json"
-          cleanup_output="$RUNNER_TEMP/mas-secret-cleanup.log"
-          cleanup_container() {
-            local container="$1" lookup_output="$RUNNER_TEMP/mas-cleanup-$1.log" container_id status=0
-            if ! container_command "$lookup_output" 30 docker ps -aq --filter "name=^/$container$"; then
-              status=1
-            elif ! container_id="$(tr -d '\r\n' <"$lookup_output")"; then
-              status=1
-            elif [[ -n "$container_id" ]] && ! container_command "$cleanup_output" 30 docker rm -f "$container_id"; then
-              status=1
-            fi
-            if ! rm -f -- "$lookup_output" "$lookup_output.stderr"; then
-              status=1
-            fi
-            return "$status"
-          }
-          cleanup() {
-            local status=0
-            cleanup_container "$mas_container" || status=1
-            if ! rm -f -- "$mas_output" "$mas_output.stderr" "$mas_user_output" "$mas_user_output.stderr" \
-              "$mas_mounts" "$mas_mounts.stderr" \
-              "$cleanup_output" "$cleanup_output.stderr"; then
-              status=1
-            fi
-            return "$status"
-          }
-          cleanup_on_exit() {
-            local status=$?
-            trap - EXIT
-            if ! cleanup; then
-              echo 'MAS secret proof failed: cleanup' >&2
-              if [[ "$status" -eq 0 ]]; then
-                status=1
-              fi
-            fi
-            exit "$status"
-          }
-          trap cleanup_on_exit EXIT
-
-          mas_failure() {
-            echo "MAS secret proof failed: $1" >&2
-            exit 1
-          }
-
-          docker_value() {
-            local output="$1"
-            shift
-            container_command "$output" 60 docker "$@" | tr -d '\r\n'
-          }
-          if ! container_command --sensitive "$mas_output" 120 docker compose --ansi never --env-file .env.example \
-            -f .github/secret-proof.compose.yml run \
-            --name "$mas_container" --no-deps -T --entrypoint /usr/local/bin/mas-cli mas-secret-proof \
-            config check --config=/config.yaml --config=/mas-environment.yaml --config=/secrets.json --config=/runtime-identity.yaml; then
-            mas_failure config-check
-          fi
-          if ! mas_check="$(<"$mas_output")"; then
-            mas_failure config-output-read
-          fi
-          if ! mas_user="$(docker_value "$mas_user_output" inspect --format '{{.Config.User}}' "$mas_container")"; then
-            mas_failure container-user-inspection
-          fi
-          if [[ "$mas_user" != "991:991" ]]; then
-            mas_failure container-user-contract
-          fi
-          if ! container_command --sensitive "$mas_mounts" 60 docker inspect \
-            --format '{{json .Mounts}}' "$mas_container"; then
-            mas_failure mount-inspection
-          fi
-          if ! jq -e '
-            type == "array" and length == 4 and
-            ([.[].Destination] | sort) == ["/config.yaml", "/mas-environment.yaml", "/runtime-identity.yaml", "/secrets.json"] and
-            all(.[]; .RW == false)
-          ' "$mas_mounts" >/dev/null; then
-            mas_failure mount-contract
-          fi
-          for marker in \
-            ci-synapse-secret-fixture \
-            'ed25519 0 AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8' \
-            AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8; do
-            if grep -F -- "$marker" <<<"$mas_check" >/dev/null; then
-              mas_failure output-secret-isolation
-            fi
-          done
-          if ! cleanup; then
-            trap - EXIT
-            mas_failure cleanup
-          fi
-          trap - EXIT
-          echo "MAS uid 991 read its own file-backed secret and had only its four declared mounts"
-
-      - name: Verify pinned Synapse JSON config loader
-        run: |
-          set -euo pipefail
-          source .github/scripts/container-helpers.sh
-          mkdir -p "$TELECRYPT_DATA_DIR/runtime"
-          # .env.example selects the stage profile for this CI proof. The source validator proves
-          # the closed production/stage map; this container proof loads both tracked profiles and
-          # proves their values in the explicit base → environment → secrets → identity order.
-          printf '%s\n' 'server_name: stage.telecrypt.io' 'public_baseurl: https://backend.stage.telecrypt.io/' > "$TELECRYPT_DATA_DIR/runtime/synapse.identity.yaml"
-          printf '%s\n' 'http:' '  public_base: https://backend.stage.telecrypt.io/auth/' '  issuer: https://backend.stage.telecrypt.io/auth/' > "$TELECRYPT_DATA_DIR/runtime/mas.identity.yaml"
-          synapse_loader_output="$RUNNER_TEMP/synapse-json-loader.log"
-          synapse_loader_cleanup() {
-            if ! rm -f -- "$synapse_loader_output" "$synapse_loader_output.stderr"; then
-              echo 'Synapse JSON loader diagnostics cleanup failed' >&2
-              return 1
-            fi
-            return 0
-          }
-          synapse_loader_cleanup_on_exit() {
-            local status=$?
-            trap - EXIT
-            if ! synapse_loader_cleanup && [[ "$status" -eq 0 ]]; then status=1; fi
-            exit "$status"
-          }
-          synapse_loader_failure() {
-            echo "Synapse JSON loader proof failed: $1" >&2
-            exit 1
-          }
-          trap synapse_loader_cleanup_on_exit EXIT
-          synapse_loader_status=0
-          if container_command --sensitive "$synapse_loader_output" 120 docker compose --ansi never --env-file .env.example \
-            -f .github/secret-proof.compose.yml run --rm --no-deps -T \
-            --entrypoint python synapse-loader-proof -c '
-          import contextlib
-          import io
-
-          allowed_config_paths = {
-              "server",
-              "database",
-              "logging",
-              "repository",
-              "key",
-              "media",
-              "listeners",
-          }
-
-          def config_marker(error):
-              path = getattr(error, "path", None)
-              if isinstance(path, (list, tuple)) and path:
-                  top_level = path[0]
-              elif isinstance(path, str):
-                  top_level = path.split(".", 1)[0]
-              else:
-                  top_level = None
-              if top_level in allowed_config_paths:
-                  return "config-" + top_level
-              return "config-unknown"
-
-          def print_marker(marker):
-              print("telecrypt-synapse-loader:" + marker)
-
-          class LoaderFailure(Exception):
-              pass
-
-          marker = "unexpected"
-          try:
-              with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                  from synapse.config._base import ConfigError
-                  from synapse.config.homeserver import HomeServerConfig
-                  try:
-                      for profile_path, expected_limits in (
-                          ("/synapse-environment.yaml", {
-                              "rc_message": (1000, 1000),
-                              "rc_room_creation": (1000, 1000),
-                          }),
-                          ("/synapse-production-environment.yaml", {
-                              "rc_message": (0.2, 10),
-                              "rc_room_creation": (0.016, 10),
-                          }),
-                      ):
-                          config = HomeServerConfig.load_config(
-                              "Synapse JSON loader proof",
-                              ["-c", "/homeserver.yaml", "-c", profile_path, "-c", "/secrets.json", "-c", "/runtime-identity.yaml"],
-                          )
-                          server_name = getattr(getattr(config, "server", None), "server_name", None)
-                          ratelimiting = getattr(config, "ratelimiting", None)
-                          if config is None or server_name != "stage.telecrypt.io" or ratelimiting is None or any(
-                              (setting := getattr(ratelimiting, name, None)) is None or
-                              (setting.per_second, setting.burst_count) != limits
-                              for name, limits in expected_limits.items()
-                          ):
-                              marker = "profile-values"
-                              break
-                      else:
-                          marker = "success"
-                  except ConfigError as error:
-                      marker = config_marker(error)
-                  except FileNotFoundError:
-                      marker = "file-not-found"
-                  except PermissionError:
-                      marker = "permission"
-                  except ModuleNotFoundError:
-                      marker = "module-import"
-                  except ImportError:
-                      marker = "module-import"
-                  except SystemExit:
-                      marker = "parser-exit"
-                  except LoaderFailure:
-                      marker = "unexpected"
-                  except Exception:
-                      marker = "unexpected"
-          except ModuleNotFoundError:
-              marker = "module-import"
-          except ImportError:
-              marker = "module-import"
-          except SystemExit:
-              marker = "parser-exit"
-          except Exception:
-              marker = "unexpected"
-
-          print_marker(marker)
-          if marker != "success":
-              raise SystemExit(1)
-          '; then
-            synapse_loader_status=0
-          else
-            synapse_loader_status=$?
-          fi
-          if ! synapse_loader_marker="$(cat -- "$synapse_loader_output")"; then
-            synapse_loader_failure output-read
-          fi
-          if [[ -z "$synapse_loader_marker" && "$synapse_loader_status" -ne 0 ]]; then
-            synapse_loader_failure container-run
-          fi
-          case "$synapse_loader_marker" in
-            telecrypt-synapse-loader:success)
-              if [[ "$synapse_loader_status" -ne 0 ]]; then
-                synapse_loader_failure container-diagnostic
-              fi
-              trap - EXIT
-              synapse_loader_cleanup
-              echo 'Synapse JSON config loader accepted'
-              ;;
-            telecrypt-synapse-loader:config-server|telecrypt-synapse-loader:config-database|\
-            telecrypt-synapse-loader:config-logging|telecrypt-synapse-loader:config-repository|\
-            telecrypt-synapse-loader:config-key|telecrypt-synapse-loader:config-media|\
-            telecrypt-synapse-loader:config-listeners|telecrypt-synapse-loader:config-unknown|\
-            telecrypt-synapse-loader:file-not-found|telecrypt-synapse-loader:permission|\
-            telecrypt-synapse-loader:module-import|telecrypt-synapse-loader:parser-exit|\
-            telecrypt-synapse-loader:profile-values|telecrypt-synapse-loader:unexpected)
-              synapse_loader_failure "${synapse_loader_marker#telecrypt-synapse-loader:}"
-              ;;
-            *)
-              synapse_loader_failure output-contract
-              ;;
-          esac
-
-      - name: Verify exact selected container images
-        run: |
-          set -euo pipefail
-          source .github/scripts/container-helpers.sh
-          images_file="$(mktemp)"
-          raw_images_file="$(mktemp)"
-          cleanup() {
-            local status=0
-            if ! rm -f -- "$images_file" "$raw_images_file"; then status=1; fi
-            return "$status"
-          }
-          cleanup_on_exit() {
-            local status=$?
-            trap - EXIT
-            if ! cleanup && [[ "$status" -eq 0 ]]; then status=1; fi
-            exit "$status"
-          }
-          trap cleanup_on_exit EXIT
-          container_command --sensitive "$raw_images_file" 120 \
-            docker compose --profile janitor --env-file .env.example config --images
-          rm -f -- "$raw_images_file.stderr"
-          sort -u "$raw_images_file" > "$images_file"
-          python3 .github/scripts/validate.py image-list "$images_file"
-
-      - name: Validate Caddy
-        run: |
-          set -euo pipefail
-          source .github/scripts/container-helpers.sh
-          image_list="$RUNNER_TEMP/caddy-image-list"
-          container_command --sensitive "$image_list" 120 \
-            docker compose --profile janitor --env-file .env.example config --images
-          rm -f -- "$image_list.stderr"
-          caddy_image="$(awk '/docker.io\/caddy:/ { print; exit }' "$image_list")"
-          test -n "$caddy_image"
-          for server_name in telecrypt.io stage.telecrypt.io; do
-            caddy_validation="$RUNNER_TEMP/caddy-validation-$server_name"
-            container_command --sensitive "$caddy_validation" 120 docker run --rm \
-              --user 65532:65532 \
-              --read-only \
-              --security-opt no-new-privileges=true \
-              --cap-drop ALL \
-              --cap-add NET_BIND_SERVICE \
-              --network none \
-              --tmpfs /config/caddy:uid=65532,gid=65532,mode=0700 \
-              --tmpfs /data/caddy:uid=65532,gid=65532,mode=0700 \
-              --env TRUSTED_PROXY=192.0.2.10/32 \
-              --env SERVER_NAME="$server_name" \
-              --volume "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
-              --volume "$PWD/caddy:/etc/caddy/caddy:ro" \
-              "$caddy_image" caddy validate --config /etc/caddy/Caddyfile
-            rm -f -- "$caddy_validation.stderr"
-            caddy_adapted="$RUNNER_TEMP/caddy-adapted-$server_name.json"
-            container_command --sensitive "$caddy_adapted" 120 docker run --rm \
-              --user 65532:65532 \
-              --read-only \
-              --security-opt no-new-privileges=true \
-              --cap-drop ALL \
-              --cap-add NET_BIND_SERVICE \
-              --network none \
-              --tmpfs /config/caddy:uid=65532,gid=65532,mode=0700 \
-              --tmpfs /data/caddy:uid=65532,gid=65532,mode=0700 \
-              --env TRUSTED_PROXY=192.0.2.10/32 \
-              --env SERVER_NAME="$server_name" \
-              --volume "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
-              --volume "$PWD/caddy:/etc/caddy/caddy:ro" \
-              "$caddy_image" caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile --pretty
-            rm -f -- "$caddy_adapted.stderr"
-            python3 .github/scripts/validate.py adapted-caddy "$caddy_adapted" "$server_name"
-          done
+          printf 'release_commit=%s\n' "$release_commit" >> "$GITHUB_OUTPUT"
+          printf 'annotated_tag_sha=%s\n' "$(git rev-parse "$release_tag_ref")" >> "$GITHUB_OUTPUT"
 
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/server-state-')
@@ -591,7 +123,7 @@ jobs:
 
           release_commit="$RELEASE_COMMIT"
           export SERVER_STATE_ANNOTATED_TAG_SHA="$RELEASE_ANNOTATED_TAG_SHA"
-          python3 .github/scripts/validate.py source
+          python3 .github/scripts/validate.py manifest
 
           source versions.env
           METADATA_DIR="$metadata_dir" timeout --signal=TERM --kill-after=5s 240s .github/scripts/fetch_product_releases.sh

@@ -1,7 +1,7 @@
 # Synapse — committed base config. Contains NO secrets.
-# Compose loads this committed base first, then the exact SERVER_NAME-selected nonsecret profile,
+# The runtime loads this committed base first, then the exact SERVER_NAME-selected nonsecret profile,
 # the private JSON overlay, and finally the runtime identity layer. The Harness writes public
-# identity (server_name and public_baseurl) to that final runtime layer before Compose validation.
+# identity (server_name and public_baseurl) to that final runtime layer before activation.
 # Secret-bearing values remain private; reviewed nonsecret loader options are committed here.
 
 signing_key_path: "/signing.key"          # provided from TELECRYPT_DATA_DIR/secrets (never committed)
@@ -23,7 +23,7 @@ listeners:
     tls: false
     type: http
     x_forwarded: true
-    bind_addresses: ['0.0.0.0']
+    bind_addresses: ['127.0.0.1']
     resources:
       - names: [client]              # client resource includes client + media APIs; federation disabled
         compress: false
@@ -69,7 +69,7 @@ user_types:
     - verified
 
 # Fail-closed capability restrictions for unverified users (uploads, room cap, encryption).
-# Baked into the exact TeleCrypt Synapse image selected in compose.yml, which contains
+# Baked into the exact TeleCrypt Synapse image selected by Server State, which contains
 # the Controlplane policy-module wheel. Its source and tests live in controlplane.
 modules:
   - module: tier_controller.TierController

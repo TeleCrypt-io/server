@@ -1,25 +1,16 @@
-# ── Secrets & runtime state — NEVER commit ───────────────────────────────────
-# Real secrets live only in the private `TELECRYPT_DATA_DIR/secrets` directory.
-# This repo carries *.example templates only.
+# Private secrets and runtime files stay outside the repository.
 
-# Environment / compose-level secrets
+# Private environment files
 .env
 *.env
-!.env.example
 !versions.env
 
-# Any real secrets files (only *.example.* may be committed)
-secrets/*
-!secrets/*.example.yaml
-!secrets/*.example.yml
-!secrets/*.example.json
-!secrets/*.example.env
-!secrets/README.md
+# Local secret data
+secrets/
 
 # Key / identity material (must never leave the host)
 *.key
 *.pem
-*signing.key
 
 # Persistent data (bind-mounted from the host; not part of the repo)
 persistent_data/

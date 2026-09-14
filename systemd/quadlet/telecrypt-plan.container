@@ -1,0 +1,26 @@
+[Unit]
+Description=TeleCrypt Plan
+Requires=telecrypt-pod.service
+Requires=telecrypt-mas.service
+After=telecrypt-pod.service telecrypt-mas.service
+PartOf=telecrypt.target
+
+[Container]
+ContainerName=telecrypt-plan
+Image=${CONTROLPLANE_IMAGE}
+PodmanArgs=--pod=telecrypt
+PodmanArgs=--security-opt=no-new-privileges
+PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/plan.secrets.env
+Pull=never
+User=991:991
+ReadOnly=true
+DropCapability=ALL
+Environment=SERVER_NAME=${SERVER_NAME}
+Environment=BILLING_ENVIRONMENT=${BILLING_ENVIRONMENT}
+Exec=/plan
+
+[Service]
+EnvironmentFile=/home/ubuntu/telecrypt-deployment.env
+EnvironmentFile=/home/ubuntu/telecrypt-current/versions.env
+Restart=always
+RestartSec=2

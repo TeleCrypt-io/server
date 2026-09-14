@@ -1,0 +1,31 @@
+[Unit]
+Description=TeleCrypt Cashier
+Requires=telecrypt-pod.service
+Requires=telecrypt-synapse.service
+After=telecrypt-pod.service telecrypt-synapse.service
+PartOf=telecrypt.target
+
+[Container]
+ContainerName=telecrypt-cashier
+Image=${CASHIER_IMAGE}
+PodmanArgs=--pod=telecrypt
+PodmanArgs=--security-opt=no-new-privileges
+PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/cashier.secrets.env
+PodmanArgs=--sdnotify=healthy
+Pull=never
+User=991:991
+ReadOnly=true
+DropCapability=ALL
+Environment=SERVER_NAME=${SERVER_NAME}
+Environment=BILLING_ENVIRONMENT=${BILLING_ENVIRONMENT}
+HealthCmd=["/cashier","healthcheck"]
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=30s
+
+[Service]
+EnvironmentFile=/home/ubuntu/telecrypt-deployment.env
+EnvironmentFile=/home/ubuntu/telecrypt-current/versions.env
+Restart=always
+RestartSec=2

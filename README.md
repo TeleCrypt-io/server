@@ -4,72 +4,31 @@ Public runtime configuration for the TeleCrypt Matrix service:
 
 Current TeleCrypt project facts and decisions are maintained only in the canonical
 [`llms.txt`](https://telecrypt-io.github.io/llms-authority/llms.txt); this README documents this
-repository's deployment composition and release contract.
+repository's deployment model and release contract.
 
 ## Configuration and activation
 
-1. Obtain the private deployment procedure and secret-file contract from the TeleCrypt Harness
-   maintained by the operator.
-2. Follow the private Harness release procedure to verify and prepare the exact state release.
-   Use its separately released `deploy` program for Docker image pulls and Compose `--no-build`
-   activation. That program reports Docker results only; it does not verify GitHub releases,
-   validate application credentials, or run application acceptance tests.
-3. Do not run direct `docker compose pull`, `up`, `run`, or equivalent production activation
-   commands from this public repository. This repository's workflow validates public state;
-   the operator prepares private service configuration, and Harness owns acceptance tests.
+The private Harness owns host setup, private runtime values, deployment, service activation, and
+acceptance. This repository supplies the public state files and systemd units; use the Harness
+release procedure to install and activate them.
 
-`versions.env` is the canonical image coordinate manifest and must contain exactly these five keys:
-`CADDY_IMAGE`, `SYNAPSE_IMAGE`, `MAS_IMAGE`, `CONTROLPLANE_IMAGE`, and `CASHIER_IMAGE`. The private
-environment, derived backend and public-site hostnames, ingress binding, identity overlays, and
-secret-file contract are maintained by the operator's private Harness. Compose reads the prepared
-operator, service-private, and image-version files through its native command-line `--env-file`
-interface. Service environment is explicit except MAS's single nonsecret `RUST_LOG` value, loaded
-from its exact `SERVER_NAME`-selected profile file. The committed `.env.example` contains TEST-NET
-documentation values only; replace them through the private
-deployment procedure before activation.
+`versions.env` is the only image coordinate source and contains exactly five keys: `CADDY_IMAGE`,
+`SYNAPSE_IMAGE`, `MAS_IMAGE`, `CONTROLPLANE_IMAGE`, and `CASHIER_IMAGE`. The Quadlet declarations in
+`systemd/quadlet/` consume those values. `systemd/telecrypt-pod.service` creates the shared rootless
+Podman pod with pasta and the configured ingress binding; `systemd/telecrypt.target` groups the
+long-running services. Janitor has a separate one-shot service and timer. The Harness controls timer
+activation for each environment.
 
-The Matrix private inputs are `${TELECRYPT_DATA_DIR}/secrets/synapse.secrets.json`,
-`${TELECRYPT_DATA_DIR}/secrets/synapse_signing.key`, and `${TELECRYPT_DATA_DIR}/secrets/mas.secrets.json`.
-The operator prepares these files for their owning applications as file-backed Compose secrets; the
-signing key is mounted as `/signing.key`. The MAS overlay contains its encryption/signing secrets,
-database URI, Matrix shared secret, and two exact environment-bound clients. Synapse loads the
-committed base, then the exact tracked nonsecret profile selected by `SERVER_NAME`, then its private
-JSON overlay, and finally the runtime identity layer. The two profile files contain only the explicit
-request-mutation limiters: production keeps Synapse's standard `rc_message` (`per_second: 0.2`,
-`burst_count: 10`) and `rc_room_creation` (`per_second: 0.016`, `burst_count: 10`), while Stage uses
-deliberately unsafe `per_second: 1000` and `burst_count: 1000` values for both settings so acceptance
-tests do not spend their time in Synapse's production throttles. This production-bounded,
-Stage-fast split is a deliberate product and testing decision. Synapse's config files are
-shallow-merged by top-level key, so its private overlay owns each complete `database` and
-`matrix_authentication_service` map; the committed base and profile contain no partial map that
-could overwrite it.
-MAS follows the same environment split through the exact `SERVER_NAME`-selected `mas.*.yaml`
-profile. Production keeps the reviewed login defaults (per-IP burst 3 replenishing at 0.05 per
-second, per-account burst 1,800 replenishing at 0.5 per second) and permits a burst of 100
-registrations replenishing at two per second. Stage deliberately disables those login and
-registration backstops for fast parallel acceptance tests: both login buckets and the registration
-bucket have a burst of 100,000 and replenish at 1,000 per second. The Stage overrides are limited
-to the buckets that the acceptance flow exercises; email, recovery, and policy defaults remain in
-`mas.yaml`. MAS 1.23 requires positive limiter values, so these explicit Stage values preserve the
-schema while keeping the test profile unsafely fast. The final runtime identity layer supplies the
-shared Plan/Janitor admin-client ID. The committed base configs retain reviewed nonsecret loader
-options, while credentials, database URIs, OAuth client secrets, and provider values remain outside this repository.
-Logging uses the same exact environment selection. Production keeps MAS at INFO and keeps its current
-Synapse and filtered Caddy access logs. Stage raises MAS and Synapse HTTP client/server logging to
-DEBUG while keeping Synapse root and SQL logging at INFO. Stage Caddy also enables debug and
-credential logging and writes unsampled, unfiltered JSON access records, including complete request
-and response headers and query strings. The Caddy routes are shared across both profiles.
-Janitor runs real lock sweeps in both the isolated test profiles and the live profile; it has no
-dry-run mode. Each profile uses its own exact MAS deployment, database, and deployment-identity
-binding. A payment concurrent with a lock may leave a paid member locked; the accepted recovery
-policy is manual unlocking by the paying team owner through Plan, restricted to their own team.
-Payment does not automatically unlock the member. Plan uses the existing `MAS_ADMIN_CLIENT_ID`
-and `MAS_ADMIN_CLIENT_SECRET` shared with Janitor through the internal `mas_admin_net` at
-`http://mas-admin:8081`; its browser OIDC client stays separate. Plan checks Cashier's
-authoritative owner, active-plan, and member state before calling MAS. This adds no MAS client.
-Keep the Stage timer disabled until controlled Stage account tests verify actual locking, paid-account exclusion, existing-session access loss,
-and manual recovery through the Plan controls. Source changes alone do not establish this acceptance.
-The MAS admin listener has no externally reachable port; no MAS port is published, and Caddy does not route this private path. The S3-compatible endpoint `sss.telecrypt.io` is reachable only from authorized production and stage Linux VMs.
+Private environment, identity, and secret files are supplied outside this repository. The tracked
+Synapse and MAS base and profile files contain nonsecret configuration; the Harness supplies their
+private overlays and runtime identity files. No operator `.env` file or alternate image list is
+checked in.
+
+All services share one rootless Podman pod network namespace and communicate over loopback. The MAS
+admin listener is pod-local, has no host-published port, and is not routed by Caddy; MAS continues to
+authorize admin API requests. Keep the Stage Janitor timer disabled until controlled Stage account
+tests verify locking, paid-account exclusion, existing-session access loss, and manual recovery through
+Plan controls.
 
 ## Billing operations
 
@@ -80,39 +39,24 @@ configuration assembly and release contract.
 
 ## Releases
 
-This repository contains declarative state only. It publishes no packages, images, deployment
-tooling, secret templates, binaries, or wheels. Each exact state Release carries one deterministic
-JSON manifest binding the five selected image coordinates to their observed registry digests. Before
-that manifest is published, the workflow verifies live immutable GitHub Release and annotated-tag
-evidence for the public Synapse and Controlplane repositories. Every image entry in the published
-manifest contains only its selected coordinate and digest; the private Harness owns deployment
-operations and the secret-file contract.
+The repository publishes no packages, images, deployment tools, binaries, or secret templates. The
+validation workflow checks that every exact image in `versions.env` is available and parses the
+Quadlet units using Podman's 4.9.3 user generator, matching Stage. The image release validator also
+checks the selected image metadata and provenance before writing the release manifest.
 
-A deliberately pushed, reviewed state tag receives an exact `server-state-<short-git-sha>` GitHub
-Release through the standard GitHub CLI. The validation job requires an annotated tag whose commit
-matches both the tag suffix and push event, then checks that commit is an ancestor of the fetched
-`main` branch. It passes that commit and tag-object identity to the release job, which verifies the
-same checkout before generating the manifest. `main` may advance while the workflow runs. The
-release job creates the release only after it has verified the exact component releases, OCI
-provenance, and image digests; it then reads back the immutable release and downloads the manifest
-to verify its exact bytes. An existing same-tag release is left unchanged, and GitHub CLI reports
-the conflict. If publication fails after leaving a partial draft, the owner must inspect and remove
-it before retrying; the workflow does not attempt recovery. It selects exact component image
-releases, which must already be published and verified. The
-private Cashier immutable-Release check is intentionally an owner-authenticated local Harness gate
-performed before Server State selection; the hosted workflow validates Cashier only from its selected
-public GHCR digest and the exact OCI source, version, and revision labels. The Release's single JSON asset binds those selected tags to their observed canonical
-registry digests for Harness preflight. `versions.env` is the one canonical image coordinate manifest
-with exactly the five image keys used by Compose (`CADDY_IMAGE`, `SYNAPSE_IMAGE`, `MAS_IMAGE`,
-`CONTROLPLANE_IMAGE`, and `CASHIER_IMAGE`); the workflow
-rejects any Compose image tag, first-party image label, default command, entrypoint, user, route, or
-public-origin contract that differs from the selected release contract. The state release is an
-identity for one configuration commit, not a package version. Controlplane and Cashier images
-advertise config contract `1`. The validation workflow runs on pushes to `main` and
-`server-state-*` tags. It authenticates to GHCR and checks all five selected image manifests on each
-run; only tag runs verify the release identity and publish a state release. Pull requests do not
-trigger this workflow. Do not change `versions.env` or `compose.yml` independently; update their
-exact coordinates and contracts together in one reviewed exact state change.
+A reviewed `server-state-<short-git-sha>` annotated tag identifies one configuration commit. The
+validation job requires the tag suffix and push event to match its target, then checks that commit is
+an ancestor of the fetched `main` branch. It passes the commit and annotated tag-object identity to the
+release job, which verifies the same checkout before publication; `main` may advance while the
+workflow runs.
+
+The immutable Server State GitHub Release carries one deterministic JSON asset binding the five
+selected image coordinates to their observed registry digests. Before publishing it, the workflow
+verifies immutable GitHub Release and annotated-tag evidence for Synapse and Controlplane, along with
+the required OCI provenance. The release job reads back the published release and verifies the asset's
+exact bytes. Existing same-tag releases are left unchanged. If publication leaves a partial draft, the
+owner inspects and removes it before retrying; the workflow does not attempt recovery. The private
+Harness owns deployment and acceptance.
 
 ## Security and licence
 

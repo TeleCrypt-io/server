@@ -1,0 +1,13 @@
+[Unit]
+Description=TeleCrypt Janitor one-shot
+Requires=telecrypt-pod.service
+Requires=telecrypt-mas.service
+Requires=telecrypt-cashier.service
+After=telecrypt-pod.service telecrypt-mas.service telecrypt-cashier.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=15min
+EnvironmentFile=/home/ubuntu/telecrypt-deployment.env
+EnvironmentFile=/home/ubuntu/telecrypt-current/versions.env
+ExecStart=/usr/bin/flock --no-fork /home/ubuntu/.telecrypt-deploy-lock /usr/bin/podman run --rm --pull=never --name=telecrypt-janitor --pod=telecrypt --user=991:991 --read-only --cap-drop=ALL --security-opt=no-new-privileges --env=SERVER_NAME --env=BILLING_ENVIRONMENT --env-file=${TELECRYPT_DATA_DIR}/secrets/janitor.secrets.env ${CONTROLPLANE_IMAGE} /janitor

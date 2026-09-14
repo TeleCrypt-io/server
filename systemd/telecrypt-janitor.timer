@@ -1,0 +1,10 @@
+[Unit]
+Description=TeleCrypt Janitor daily run
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+Unit=telecrypt-janitor.service
+
+[Install]
+WantedBy=timers.target
