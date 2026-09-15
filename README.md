@@ -17,8 +17,8 @@ this repository.
 `SYNAPSE_IMAGE`, `MAS_IMAGE`, `CONTROLPLANE_IMAGE`, and `CASHIER_IMAGE`. The Quadlet declarations in
 `systemd/quadlet/` consume those values. `systemd/telecrypt-pod.service` creates the shared rootless
 Podman pod with pasta and the configured ingress binding; `systemd/telecrypt.target` groups the
-long-running services. Janitor has a separate one-shot service and timer. The Harness controls timer
-activation for each environment.
+long-running services. Janitor has a separate one-shot service and timer. Salt owns the timer
+definition and activation for each environment.
 
 Private environment, identity, and secret files are supplied outside this repository. The tracked
 Synapse and MAS base and profile files contain nonsecret configuration; the host-local Salt pillar
