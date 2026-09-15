@@ -60,12 +60,14 @@ jobs:
           install -d -m 0700 "$pillar_dir"
           install -m 0600 salt/pillar/top.sls "$pillar_dir/top.sls"
           install -m 0600 salt/pillar/telecrypt.sls.example "$pillar_dir/telecrypt.sls"
-          sudo salt-call --local --retcode-passthrough --out=quiet \
+          sudo salt-call --local --retcode-passthrough --out=raw \
             --file-root="$GITHUB_WORKSPACE" --pillar-root="$pillar_dir" \
-            state.show_sls salt.host
-          sudo salt-call --local --retcode-passthrough --out=quiet \
+            state.show_sls salt.host > "$RUNNER_TEMP/salt-host-render"
+          test -s "$RUNNER_TEMP/salt-host-render"
+          sudo salt-call --local --retcode-passthrough --out=raw \
             --file-root="$GITHUB_WORKSPACE" --pillar-root="$pillar_dir" \
-            state.show_sls salt.services
+            state.show_sls salt.services > "$RUNNER_TEMP/salt-services-render"
+          test -s "$RUNNER_TEMP/salt-services-render"
 
       - name: Check exact image manifest availability
         env:

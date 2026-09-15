@@ -45,6 +45,24 @@ Install the pinned Salt LTS version recorded in [`salt/version`](salt/version), 
 `/etc/telecrypt/pillar` directory. Rename the example to `telecrypt.sls` and replace every host
 value. Keep that directory mode `0700` and its files mode `0600`; do not commit it.
 
+On Ubuntu 24.04, install the pinned onedir packages from Salt's signed repository:
+
+```sh
+salt_version="$(<salt/version)"
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://packages.broadcom.com/artifactory/api/security/keypair/SaltProjectKey/public \
+  | gpg --dearmor | sudo tee /etc/apt/keyrings/salt-archive-keyring.pgp >/dev/null
+curl -fsSL https://github.com/saltstack/salt-install-guide/releases/latest/download/salt.sources \
+  | sudo tee /etc/apt/sources.list.d/salt.sources >/dev/null
+printf 'Package: salt-*\nPin: version 3008.*\nPin-Priority: 1001\n' \
+  | sudo tee /etc/apt/preferences.d/salt-pin-1001 >/dev/null
+sudo apt-get update
+sudo apt-get install -y "salt-minion=$salt_version" "salt-common=$salt_version"
+sudo systemctl disable --now salt-minion.service
+```
+
+Do not enable a Salt master or the minion daemon; `salt-call --local` is the only execution mode.
+
 Apply host setup before deployment:
 
 ```sh
