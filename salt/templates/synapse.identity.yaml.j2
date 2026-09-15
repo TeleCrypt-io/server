@@ -1,2 +1,2 @@
-server_name: "{{ pillar["telecrypt"]["server_name"] }}"
-public_baseurl: "https://backend.{{ pillar["telecrypt"]["server_name"] }}/"
+server_name: {{ pillar["telecrypt"]["server_name"] }}
+public_baseurl: https://backend.{{ pillar["telecrypt"]["server_name"] }}/
