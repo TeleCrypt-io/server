@@ -7,6 +7,7 @@
 
 include:
   - salt.units
+  - salt.timer
 
 telecrypt-user-daemon-reload:
   cmd.run:
