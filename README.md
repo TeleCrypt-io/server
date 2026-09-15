@@ -3,7 +3,7 @@
 Public runtime configuration for the TeleCrypt Matrix service:
 
 Current TeleCrypt project facts and decisions are maintained only in the canonical
-[`llms.txt`](https://telecrypt-io.github.io/llms-authority/llms.txt); this README documents this
+[`llms.txt`](https://www.telecrypt.io/llms.txt); this README documents this
 repository's deployment model and release contract.
 
 ## Configuration and activation
@@ -90,7 +90,7 @@ running minion daemon. Salt's local execution and file/pillar-root options are d
 
 The operator's private Harness owns billing-environment procedures, provider authority, private-input
 handling, and billing acceptance. Current public billing facts and decisions remain in the canonical
-[`llms.txt`](https://telecrypt-io.github.io/llms-authority/llms.txt); this repository retains only its
+[`llms.txt`](https://www.telecrypt.io/llms.txt); this repository retains only its
 configuration assembly and release contract.
 
 ## Releases
