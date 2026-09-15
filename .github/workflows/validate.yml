@@ -41,6 +41,32 @@ jobs:
             > "$RUNNER_TEMP/server-state-generated-units"
           test -s "$RUNNER_TEMP/server-state-generated-units"
 
+      - name: Render masterless Salt states
+        run: |
+          set -euo pipefail
+          salt_version="$(<salt/version)"
+          test "$salt_version" = "3008.2"
+          sudo install -d -m 0755 /etc/apt/keyrings
+          curl -fsSL https://packages.broadcom.com/artifactory/api/security/keypair/SaltProjectKey/public \
+            | gpg --dearmor \
+            | sudo tee /etc/apt/keyrings/salt-archive-keyring.pgp >/dev/null
+          curl -fsSL https://github.com/saltstack/salt-install-guide/releases/latest/download/salt.sources \
+            | sudo tee /etc/apt/sources.list.d/salt.sources >/dev/null
+          printf 'Package: salt-*\nPin: version 3008.*\nPin-Priority: 1001\n' \
+            | sudo tee /etc/apt/preferences.d/salt-pin-1001 >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y "salt-minion=$salt_version" "salt-common=$salt_version"
+          pillar_dir="$RUNNER_TEMP/server-state-pillar"
+          install -d -m 0700 "$pillar_dir"
+          install -m 0600 salt/pillar/top.sls "$pillar_dir/top.sls"
+          install -m 0600 salt/pillar/telecrypt.sls.example "$pillar_dir/telecrypt.sls"
+          sudo salt-call --local --retcode-passthrough --out=quiet \
+            --file-root="$GITHUB_WORKSPACE" --pillar-root="$pillar_dir" \
+            state.show_sls salt.host
+          sudo salt-call --local --retcode-passthrough --out=quiet \
+            --file-root="$GITHUB_WORKSPACE" --pillar-root="$pillar_dir" \
+            state.show_sls salt.services
+
       - name: Check exact image manifest availability
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

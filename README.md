@@ -8,9 +8,10 @@ repository's deployment model and release contract.
 
 ## Configuration and activation
 
-The private Harness owns host setup, private runtime values, deployment, service activation, and
-acceptance. This repository supplies the public state files and systemd units; use the Harness
-release procedure to install and activate them.
+The private Harness owns release verification, deployment procedure and acceptance. This
+repository supplies the public application state, systemd units and masterless Salt states.
+Each host keeps its own Salt pillar, runtime values and secrets; none of those values belong in
+this repository.
 
 `versions.env` is the only image coordinate source and contains exactly five keys: `CADDY_IMAGE`,
 `SYNAPSE_IMAGE`, `MAS_IMAGE`, `CONTROLPLANE_IMAGE`, and `CASHIER_IMAGE`. The Quadlet declarations in
@@ -20,15 +21,52 @@ long-running services. Janitor has a separate one-shot service and timer. The Ha
 activation for each environment.
 
 Private environment, identity, and secret files are supplied outside this repository. The tracked
-Synapse and MAS base and profile files contain nonsecret configuration; the Harness supplies their
-private overlays and runtime identity files. No operator `.env` file or alternate image list is
-checked in.
+Synapse and MAS base and profile files contain nonsecret configuration; the host-local Salt pillar
+supplies its environment values and renders the deployment environment and runtime identity files.
+Secret contents remain in the existing host-local files. No operator `.env` file, populated pillar or
+alternate image list is checked in.
 
 All services share one rootless Podman pod network namespace and communicate over loopback. The MAS
 admin listener is pod-local, has no host-published port, and is not routed by Caddy; MAS continues to
-authorize admin API requests. Keep the Stage Janitor timer disabled until controlled Stage account
-tests verify locking, paid-account exclusion, existing-session access loss, and manual recovery through
-Plan controls.
+authorize admin API requests. Salt owns the Janitor timer definition and its enabled, active state;
+the timer invokes only the tracked oneshot service and is observed through the ordinary Stage
+acceptance schedule.
+
+## Host configuration with masterless Salt
+
+The `salt/` tree is applied locally on an Ubuntu host with `salt-call --local`. It manages the
+runtime packages, rootless Podman prerequisites, operator directories, nonsecret runtime identity
+files, secret-file metadata, the SSH daemon drop-in, stable systemd/Quadlet links and Janitor
+scheduling. It does not manage networking, SSH keys, sudo rules, persistent data or secret contents.
+
+Install the pinned Salt LTS version recorded in [`salt/version`](salt/version), then copy
+[`salt/pillar/top.sls`](salt/pillar/top.sls) and
+[`salt/pillar/telecrypt.sls.example`](salt/pillar/telecrypt.sls.example) to a private
+`/etc/telecrypt/pillar` directory. Rename the example to `telecrypt.sls` and replace every host
+value. Keep that directory mode `0700` and its files mode `0600`; do not commit it.
+
+Apply host setup before deployment:
+
+```sh
+sudo salt-call --local --retcode-passthrough \
+  --file-root="$RELEASE_DIR" --pillar-root=/etc/telecrypt/pillar \
+  state.apply salt.host
+```
+
+After the released `deploy` helper activates the selected Server State release, apply service
+activation and Janitor scheduling:
+
+```sh
+sudo salt-call --local --retcode-passthrough \
+  --file-root="$RELEASE_DIR" --pillar-root=/etc/telecrypt/pillar \
+  state.apply salt.services
+```
+
+`deploy` selects versions, pulls their prebuilt images, switches `telecrypt-current`, reloads the
+user manager and restarts the application target. Salt owns the link topology and Janitor timer;
+the two operations are serialized by the operator. Masterless mode requires no Salt master or
+running minion daemon. Salt's local execution and file/pillar-root options are documented in the
+[Salt CLI reference](https://docs.saltproject.io/en/latest/ref/cli/salt-call.html).
 
 ## Billing operations
 
@@ -39,10 +77,11 @@ configuration assembly and release contract.
 
 ## Releases
 
-The repository publishes no packages, images, deployment tools, binaries, or secret templates. The
-validation workflow checks that every exact image in `versions.env` is available and parses the
-Quadlet units using Podman's 4.9.3 user generator, matching Stage. The image release validator also
-checks the selected image metadata and provenance before writing the release manifest.
+The repository publishes no packages, images, deployment tools, binaries, or populated secret
+templates. The validation workflow checks that every exact image in `versions.env` is available,
+parses the Quadlet units using Podman's 4.9.3 user generator, and renders the Salt states with
+synthetic host values. The image release validator also checks the selected image metadata and
+provenance before writing the release manifest.
 
 A reviewed `server-state-<short-git-sha>` annotated tag identifies one configuration commit. The
 validation job requires the tag suffix and push event to match its target, then checks that commit is

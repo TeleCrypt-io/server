@@ -1,0 +1,12 @@
+telecrypt:
+  data_dir: /srv/telecrypt
+  server_name: stage.example.invalid
+  billing_environment: test
+  ingress_bind_address: 192.0.2.28
+  trusted_proxy: 192.0.2.1/32
+  operator_uid: 1000
+  operator_gid: 1000
+  subuid_start: 100000
+  subgid_start: 100000
+  subordinate_count: 65536
+  admin_client_id: REPLACE_WITH_HOST_VALUE
