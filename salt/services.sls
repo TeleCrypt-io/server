@@ -14,6 +14,14 @@ telecrypt-user-daemon-reload:
     - name: systemctl --user daemon-reload
     - runas: ubuntu
     - env: {{ env }}
+    - onchanges:
+      - file: telecrypt-janitor-timer-file
+{% for name in ("telecrypt-pod.service", "telecrypt.target", "telecrypt-janitor.service") %}
+      - file: telecrypt-unit-link-{{ name|replace(".", "-") }}
+{% endfor %}
+{% for name in ("telecrypt-caddy.container", "telecrypt-cashier.container", "telecrypt-mas.container", "telecrypt-plan.container", "telecrypt-registration.container", "telecrypt-synapse.container") %}
+      - file: telecrypt-quadlet-link-{{ name|replace(".", "-") }}
+{% endfor %}
     - require:
       - file: telecrypt-janitor-timer-file
 {% for name in ("telecrypt-pod.service", "telecrypt.target", "telecrypt-janitor.service") %}
