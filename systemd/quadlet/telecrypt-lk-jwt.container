@@ -17,7 +17,8 @@ ReadOnly=true
 DropCapability=ALL
 Environment=LIVEKIT_JWT_BIND=127.0.0.1:9013
 Environment=LIVEKIT_FULL_ACCESS_HOMESERVERS=${SERVER_NAME}
-HealthCmd=["/lk-jwt-service-healthcheck"]
+# Podman 4.9 treats a one-item array as CMD-SHELL; the image has no shell.
+HealthCmd=["/lk-jwt-service-healthcheck",""]
 HealthInterval=30s
 HealthTimeout=5s
 HealthRetries=3
