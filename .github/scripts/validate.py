@@ -14,13 +14,19 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-IMAGE_KEYS = ("CADDY_IMAGE", "SYNAPSE_IMAGE", "MAS_IMAGE", "CONTROLPLANE_IMAGE", "CASHIER_IMAGE")
 IMAGE_RULES = {
     "CADDY_IMAGE": ("docker.io/caddy", r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)-alpine"),
     "SYNAPSE_IMAGE": ("ghcr.io/telecrypt-io/telecrypt-synapse", r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)-tc(?:0|[1-9][0-9]*)"),
     "MAS_IMAGE": ("ghcr.io/element-hq/matrix-authentication-service", r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"),
     "CONTROLPLANE_IMAGE": ("ghcr.io/telecrypt-io/controlplane", r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"),
+    "LK_JWT_IMAGE": ("ghcr.io/element-hq/lk-jwt-service", r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"),
     "CASHIER_IMAGE": ("ghcr.io/telecrypt-io/telecrypt-cashier", r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"),
+}
+IMAGE_KEYS = tuple(IMAGE_RULES)
+UPSTREAM_RELEASES = {
+    "CADDY_IMAGE": "caddyserver/caddy",
+    "MAS_IMAGE": "element-hq/matrix-authentication-service",
+    "LK_JWT_IMAGE": "element-hq/lk-jwt-service",
 }
 PRODUCT_RELEASES = {
     "SYNAPSE_IMAGE": {"repository": "TeleCrypt-io/synapse-server-container", "asset_prefix": "telecrypt-synapse-"},
@@ -42,6 +48,7 @@ SYNAPSE_LABELS = (
 IMAGE_CONFIG = {
     "CADDY_IMAGE": {"Entrypoint": None, "Cmd": ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]},
     "MAS_IMAGE": {"Entrypoint": ["/usr/local/bin/mas-cli"], "Cmd": None},
+    "LK_JWT_IMAGE": {"Entrypoint": None, "Cmd": ["/lk-jwt-service"]},
     "CONTROLPLANE_IMAGE": {"Entrypoint": None, "Cmd": ["/registration"]},
     "CASHIER_IMAGE": {"Entrypoint": ["/cashier"], "Cmd": None},
 }
@@ -98,7 +105,7 @@ def resolve_releases(directory: Path) -> dict[str, str]:
         if key in PRODUCT_RELEASES:
             repository = PRODUCT_RELEASES[key]["repository"]
         else:
-            repository = "caddyserver/caddy" if key == "CADDY_IMAGE" else "element-hq/matrix-authentication-service"
+            repository = UPSTREAM_RELEASES[key]
         release = github_api(f"repos/{repository}/releases/latest", key)
         check(isinstance(release, dict) and release.get("draft") is False
               and release.get("prerelease") is False and release.get("published_at"),
@@ -433,7 +440,7 @@ def image_release_manifest(values: dict[str, str], metadata: dict[str, dict], la
             validate_cashier_provenance(labels[key], image)
         validate_image_record(key, record)
         records[key] = record
-    check(set(records) == set(IMAGE_KEYS), "five-image manifest")
+    check(set(records) == set(IMAGE_KEYS), "expected image manifest")
     return {"annotated_tag_sha": annotated_tag_sha, "images": records, "schema_version": 1, "server_state_tag": release_tag, "source_commit": source_commit}
 
 

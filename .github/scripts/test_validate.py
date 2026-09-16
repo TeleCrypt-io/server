@@ -46,13 +46,13 @@ def workflow_run(job_name: str, step_id: str) -> str:
 
 def fixture_values() -> dict[str, str]:
     tags = {"CADDY_IMAGE": "2.11.4-alpine", "MAS_IMAGE": "1.23.0",
-            "SYNAPSE_IMAGE": "1.159-tc23", "CONTROLPLANE_IMAGE": "0.5.33", "CASHIER_IMAGE": "0.4.27"}
+            "SYNAPSE_IMAGE": "1.159-tc23", "CONTROLPLANE_IMAGE": "0.5.33", "CASHIER_IMAGE": "0.4.27", "LK_JWT_IMAGE": "0.7.0"}
     return {key: f"{validate.IMAGE_RULES[key][0]}:{tags[key]}" for key in validate.IMAGE_KEYS}
 
 
 class ManifestTests(unittest.TestCase):
 
-    def test_manifest_has_exactly_five_versioned_images(self) -> None:
+    def test_manifest_requires_the_selected_service_images(self) -> None:
         values = fixture_values()
         self.assertEqual(set(values), set(validate.IMAGE_KEYS))
         self.assertEqual(len(set(values.values())), len(validate.IMAGE_KEYS))
@@ -115,6 +115,7 @@ class ManifestTests(unittest.TestCase):
             "CADDY_IMAGE": {"Cmd": ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]},
             "SYNAPSE_IMAGE": {"Labels": synapse_labels},
             "MAS_IMAGE": {"Entrypoint": ["/usr/local/bin/mas-cli"]},
+            "LK_JWT_IMAGE": {"Cmd": ["/lk-jwt-service"]},
             "CONTROLPLANE_IMAGE": {"Cmd": ["/registration"], "Labels": product_labels["CONTROLPLANE_IMAGE"], "User": "991:991"},
             "CASHIER_IMAGE": {"Entrypoint": ["/cashier"], "Labels": product_labels["CASHIER_IMAGE"], "User": "991:991"},
         }
@@ -148,6 +149,7 @@ class ManifestTests(unittest.TestCase):
                 "missing-required-command": lambda configs: configs["CADDY_IMAGE"].pop("Cmd"),
                 "wrong-required-command": lambda configs: configs["CADDY_IMAGE"].update(Cmd=["unexpected"]),
                 "missing-required-entrypoint": lambda configs: configs["MAS_IMAGE"].pop("Entrypoint"),
+                "wrong-livekit-command": lambda configs: configs["LK_JWT_IMAGE"].update(Cmd=["unexpected"]),
                 "wrong-required-entrypoint": lambda configs: configs["MAS_IMAGE"].update(Entrypoint=["unexpected"]),
                 "invalid-wheel-release": lambda configs: configs["SYNAPSE_IMAGE"].update(Labels={**synapse_labels, "org.telecrypt.controlplane.release": "latest"}),
                 "mismatched-wheel-release": lambda configs: configs["SYNAPSE_IMAGE"].update(Labels={**synapse_labels, "org.telecrypt.controlplane.release": "0.5.16"}),
@@ -172,7 +174,7 @@ class ReleaseResolutionTests(unittest.TestCase):
             tag = image.rsplit(":", 1)[1]
             if key == "CADDY_IMAGE":
                 tag = "v" + tag.removesuffix("-alpine")
-            elif key == "MAS_IMAGE":
+            elif key in ("MAS_IMAGE", "LK_JWT_IMAGE"):
                 tag = "v" + tag
             releases[key] = {"tag_name": tag, "draft": False, "prerelease": False,
                              "published_at": "2026-09-16T12:00:00Z",
@@ -187,6 +189,8 @@ class ReleaseResolutionTests(unittest.TestCase):
             root = Path(directory)
             values = validate.resolve_releases(root)
             self.assertEqual(values, fixture_values())
+            self.assertIn(mock.call("repos/element-hq/lk-jwt-service/releases/latest", "LK_JWT_IMAGE"), api.call_args_list)
+            self.assertEqual(json.loads((root / "LK_JWT_IMAGE.release.json").read_text())["immutable"], False)
             self.assertEqual(len(api.call_args_list), len(values))
             self.assertTrue(all(call.args[0].endswith("/releases/latest") for call in api.call_args_list))
             self.assertEqual(validate.load_manifest(root / "selection.json"), values)
@@ -196,7 +200,8 @@ class ReleaseResolutionTests(unittest.TestCase):
     def test_rejects_unpublished_prerelease_nonimmutable_product_and_invalid_tags(self):
         for key, field, value in (("MAS_IMAGE", "draft", True), ("CADDY_IMAGE", "prerelease", True),
                                   ("SYNAPSE_IMAGE", "immutable", False), ("MAS_IMAGE", "tag_name", "latest-ci"),
-                                  ("CONTROLPLANE_IMAGE", "published_at", None)):
+                                  ("CONTROLPLANE_IMAGE", "published_at", None), ("LK_JWT_IMAGE", "prerelease", True),
+                                  ("LK_JWT_IMAGE", "tag_name", "v0.8.0-rc1")):
             releases = self.releases()
             releases[key][field] = value
             with self.subTest(key=key, field=field), tempfile.TemporaryDirectory() as directory, mock.patch.object(
@@ -543,8 +548,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 product_assets={key: b"fixture" for key in validate.PRODUCT_RELEASE_KEYS},
                 product_tag_refs={key: {"fixture": True} for key in validate.PRODUCT_RELEASE_KEYS},
                 product_annotated_tags={key: {"fixture": True} for key in validate.PRODUCT_RELEASE_KEYS},
-                resolved_digests={key: digest for key in values},
+                resolved_digests={key: ("sha256:" + "f" * 64 if key == "LK_JWT_IMAGE" else digest) for key in values},
             )
+        self.assertEqual(document["images"]["LK_JWT_IMAGE"], {"image": values["LK_JWT_IMAGE"], "digest": "sha256:" + "f" * 64})
         for key, record in document["images"].items():
             with self.subTest(key=key):
                 self.assertEqual(set(record), validate.IMAGE_RECORD_KEYS)
