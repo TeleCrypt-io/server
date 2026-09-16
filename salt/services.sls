@@ -34,7 +34,7 @@ telecrypt-user-daemon-reload:
 {% for name in ("telecrypt-pod.service", "telecrypt.target", "telecrypt-janitor.service") %}
       - file: telecrypt-unit-link-{{ name|replace(".", "-") }}
 {% endfor %}
-{% for name in ("telecrypt-caddy.container", "telecrypt-cashier.container", "telecrypt-mas.container", "telecrypt-plan.container", "telecrypt-registration.container", "telecrypt-synapse.container") %}
+{% for name in ("telecrypt-caddy.container", "telecrypt-cashier.container", "telecrypt-lk-jwt.container", "telecrypt-mas.container", "telecrypt-plan.container", "telecrypt-registration.container", "telecrypt-synapse.container") %}
       - file: telecrypt-quadlet-link-{{ name|replace(".", "-") }}
 {% endfor %}
     - require:
@@ -42,7 +42,7 @@ telecrypt-user-daemon-reload:
 {% for name in ("telecrypt-pod.service", "telecrypt.target", "telecrypt-janitor.service") %}
       - file: telecrypt-unit-link-{{ name|replace(".", "-") }}
 {% endfor %}
-{% for name in ("telecrypt-caddy.container", "telecrypt-cashier.container", "telecrypt-mas.container", "telecrypt-plan.container", "telecrypt-registration.container", "telecrypt-synapse.container") %}
+{% for name in ("telecrypt-caddy.container", "telecrypt-cashier.container", "telecrypt-lk-jwt.container", "telecrypt-mas.container", "telecrypt-plan.container", "telecrypt-registration.container", "telecrypt-synapse.container") %}
       - file: telecrypt-quadlet-link-{{ name|replace(".", "-") }}
 {% endfor %}
 

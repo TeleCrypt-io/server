@@ -30,7 +30,7 @@ telecrypt-unit-link-{{ name|replace(".", "-") }}:
       - file: telecrypt-user-unit-directory
 {% endfor %}
 
-{% for name in ("telecrypt-caddy.container", "telecrypt-cashier.container", "telecrypt-mas.container", "telecrypt-plan.container", "telecrypt-registration.container", "telecrypt-synapse.container") %}
+{% for name in ("telecrypt-caddy.container", "telecrypt-cashier.container", "telecrypt-lk-jwt.container", "telecrypt-mas.container", "telecrypt-plan.container", "telecrypt-registration.container", "telecrypt-synapse.container") %}
 telecrypt-quadlet-link-{{ name|replace(".", "-") }}:
   file.symlink:
     - name: {{ quadlet_dir }}/{{ name }}

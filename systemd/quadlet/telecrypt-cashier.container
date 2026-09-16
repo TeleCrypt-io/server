@@ -11,6 +11,7 @@ Image=${CASHIER_IMAGE}
 PodmanArgs=--pod=telecrypt
 PodmanArgs=--security-opt=no-new-privileges
 PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/cashier.secrets.env
+PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/dodo-webhook.env
 PodmanArgs=--sdnotify=healthy
 Pull=never
 User=991:991

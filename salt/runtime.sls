@@ -129,6 +129,8 @@ telecrypt-mas-environment:
   ("janitor.secrets.env", "0600"),
   ("plan.secrets.env", "0600"),
   ("cashier.secrets.env", "0600"),
+  ("dodo-webhook.env", "0600"),
+  ("livekit.secrets.env", "0600"),
   ("synapse.secrets.json", "0444"),
   ("synapse_signing.key", "0444"),
   ("mas.secrets.json", "0444")

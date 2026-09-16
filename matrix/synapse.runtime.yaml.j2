@@ -22,6 +22,20 @@ rc_room_creation:
   burst_count: 10
 {% endif %}
 
+# Modern client features (Element X / sliding sync / Element Call delay events), plus the
+# experimental MatrixRTC transport used by the standalone LiveKit JWT service. Synapse and the
+# service share the rootless pod loopback network namespace.
+experimental_features:
+  msc3266_enabled: true     # room summary (knocking over federation)
+  msc4222_enabled: true     # state_after in sync v2
+  msc4108_enabled: true     # QR login
+  msc3575_enabled: true     # sliding sync
+  msc4143_enabled: true     # MatrixRTC transport using LiveKit
+matrix_rtc:
+  transports:
+    - type: livekit
+      livekit_service_url: http://127.0.0.1:9013
+
 # Keep public identity last so it cannot be replaced by a private overlay.
 server_name: {{ pillar["telecrypt"]["server_name"] }}
 public_baseurl: https://backend.{{ pillar["telecrypt"]["server_name"] }}/

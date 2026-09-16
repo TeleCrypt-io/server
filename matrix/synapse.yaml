@@ -25,7 +25,7 @@ listeners:
     x_forwarded: true
     bind_addresses: ['127.0.0.1']
     resources:
-      - names: [client]              # client resource includes client + media APIs; federation disabled
+      - names: [client, openid]      # client + narrow OpenID resource; federation remains disabled
         compress: false
 
 # server_name, public_baseurl, and the environment's explicit rc_message limits are supplied by the
@@ -76,12 +76,8 @@ modules:
     config:
       restricted_room_cap: 3
 
-# Modern client features (Element X / sliding sync / Element Call delay events).
-experimental_features:
-  msc3266_enabled: true     # room summary (knocking over federation)
-  msc4222_enabled: true     # state_after in sync v2
-  msc4108_enabled: true     # QR login
-  msc3575_enabled: true     # sliding sync
+# Modern client features and MatrixRTC settings are supplied by the final runtime layer. Keeping the
+# complete mapping there avoids shallow-merge loss when the deployment adds MSC4143 for LiveKit.
 max_event_delay_duration: 24h
 
 # vim:ft=yaml

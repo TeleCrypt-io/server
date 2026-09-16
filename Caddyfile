@@ -74,7 +74,7 @@
 		-Server
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
-		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+		Permissions-Policy "camera=(self), geolocation=(), microphone=(self)"
 	}
 }
 
@@ -129,14 +129,18 @@ http://{$SERVER_NAME}:8080 {
 				"org.matrix.msc2965.authentication": {
 					"issuer": "https://backend.{$SERVER_NAME}/auth/",
 					"account": "https://backend.{$SERVER_NAME}/auth/account"
-			}
-		}`
+				},
+				"org.matrix.msc4143.rtc_foci": [{
+					"type": "livekit",
+					"livekit_service_url": "https://backend.{$SERVER_NAME}/livekit/jwt"
+				}]
+			}`
 	}
 
-	# Federation is disabled. Return the discovery endpoint directly instead of allowing the
-	# production apex redirect to advertise or delegate a federation target.
+	# The JWT service follows this discovery when it verifies a Matrix OpenID token. This is the
+	# only server-server URL exposed by Caddy; all other federation paths remain blocked below.
 	handle /.well-known/matrix/server {
-		respond "Not Found" 404
+		respond `{"m.server":"backend.{$SERVER_NAME}:443"}`
 	}
 
 	# The public website exists only for the production profile. Match the literal production
@@ -285,6 +289,14 @@ http://backend.{$SERVER_NAME}:8080 {
 		path /agents
 		not method POST
 	}
+
+	# LiveKit's standalone JWT service is reachable only through the backend prefix. Strip that
+	# public prefix so the service receives its documented /get_token, /sfu/get and webhook paths.
+	handle_path /livekit/jwt/* {
+		reverse_proxy 127.0.0.1:9013 {
+			import strip_untrusted_client_ip
+		}
+	}
 	handle @agents_other_method {
 		header Allow "POST"
 		respond "Method Not Allowed" 405
@@ -298,11 +310,23 @@ http://backend.{$SERVER_NAME}:8080 {
 			import strip_untrusted_client_ip
 		}
 	}
-	# Cashier has no browser surface. The provider's fixed signed webhook endpoint is the only public
-	# Cashier route. Access-log detail follows the selected environment profile.
+	# Cashier has no browser surface. The provider's persistent randomized signed webhook endpoint is
+	# the only public Cashier route. Access-log detail follows the selected environment profile.
 	@dodo_webhook {
 		method POST
-		path /webhooks/dodo
+		path {$DODO_WEBHOOK_PATH}
+	}
+
+	# Synapse exposes only the native OpenID servlet needed by lk-jwt-service token verification.
+	# Federation, keys, transactions and room routes remain absent from the public matcher set.
+	@matrix_openid {
+		method GET
+		path /_matrix/federation/v1/openid/userinfo
+	}
+	handle @matrix_openid {
+		reverse_proxy 127.0.0.1:8008 {
+			import strip_untrusted_client_ip
+		}
 	}
 	handle @dodo_webhook {
 		header Cache-Control "no-store"

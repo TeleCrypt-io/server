@@ -3,7 +3,8 @@ Description=TeleCrypt Caddy
 Requires=telecrypt-pod.service
 Requires=telecrypt-mas.service
 Requires=telecrypt-synapse.service
-After=telecrypt-pod.service telecrypt-mas.service telecrypt-synapse.service
+Requires=telecrypt-lk-jwt.service
+After=telecrypt-pod.service telecrypt-mas.service telecrypt-synapse.service telecrypt-lk-jwt.service
 PartOf=telecrypt.target
 
 [Container]
@@ -11,6 +12,8 @@ ContainerName=telecrypt-caddy
 Image=${CADDY_IMAGE}
 PodmanArgs=--pod=telecrypt
 PodmanArgs=--security-opt=no-new-privileges
+PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/dodo-webhook.env
+PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/livekit.secrets.env
 Pull=never
 User=65532:65532
 ReadOnly=true

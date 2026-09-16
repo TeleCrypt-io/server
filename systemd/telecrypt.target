@@ -7,6 +7,7 @@ Requires=telecrypt-synapse.service
 Requires=telecrypt-registration.service
 Requires=telecrypt-plan.service
 Requires=telecrypt-cashier.service
+Requires=telecrypt-lk-jwt.service
 After=telecrypt-pod.service
 
 [Install]
