@@ -34,7 +34,7 @@ experimental_features:
 matrix_rtc:
   transports:
     - type: livekit
-      livekit_service_url: http://127.0.0.1:9013
+      livekit_service_url: https://backend.{{ pillar["telecrypt"]["server_name"] }}/livekit/jwt
 
 # Keep public identity last so it cannot be replaced by a private overlay.
 server_name: {{ pillar["telecrypt"]["server_name"] }}
