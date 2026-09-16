@@ -39,7 +39,7 @@ jobs:
       - name: Test image and release contracts
         env:
           CADDY_IMAGE: docker.io/caddy:2.11.4-alpine
-          SYNAPSE_IMAGE: ghcr.io/telecrypt-io/telecrypt-synapse:${{ inputs.synapse_tag || '1.159-tc27' }}
+          SYNAPSE_IMAGE: ghcr.io/telecrypt-io/telecrypt-synapse:${{ inputs.synapse_tag || '1.159-tc28' }}
           MAS_IMAGE: ghcr.io/element-hq/matrix-authentication-service:1.23.0
           CONTROLPLANE_IMAGE: ghcr.io/telecrypt-io/controlplane:${{ inputs.controlplane_tag || '0.5.35' }}
           CASHIER_IMAGE: ghcr.io/telecrypt-io/telecrypt-cashier:${{ inputs.cashier_tag || '0.4.29' }}
