@@ -3,10 +3,23 @@ name: validate
 on:
   push:
     branches: [main]
-    tags: ["server-state-*"]
+  workflow_dispatch:
+    inputs:
+      synapse_tag:
+        description: Exact published Synapse release selected by the caller
+        required: true
+        type: string
+      controlplane_tag:
+        description: Exact published Controlplane release selected by the caller
+        required: true
+        type: string
+      cashier_tag:
+        description: Exact published Cashier release selected by the caller
+        required: true
+        type: string
 
 concurrency:
-  group: server-state-${{ github.workflow }}-${{ github.ref }}
+  group: server-state-assembly
   cancel-in-progress: false
 
 permissions:
@@ -17,19 +30,20 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    outputs:
-      release_commit: ${{ steps.release_identity.outputs.release_commit }}
-      annotated_tag_sha: ${{ steps.release_identity.outputs.annotated_tag_sha }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate exact image manifest
-        run: python3 .github/scripts/validate.py manifest
-
       - name: Test image and release contracts
+        env:
+          CADDY_IMAGE: docker.io/caddy:2.11.4-alpine
+          SYNAPSE_IMAGE: ghcr.io/telecrypt-io/telecrypt-synapse:${{ inputs.synapse_tag || '1.159-tc25' }}
+          MAS_IMAGE: ghcr.io/element-hq/matrix-authentication-service:1.23.0
+          CONTROLPLANE_IMAGE: ghcr.io/telecrypt-io/controlplane:${{ inputs.controlplane_tag || '0.5.33' }}
+          CASHIER_IMAGE: ghcr.io/telecrypt-io/telecrypt-cashier:${{ inputs.cashier_tag || '0.4.28' }}
+          LK_JWT_IMAGE: ghcr.io/element-hq/lk-jwt-service:0.7.0
         run: python3 .github/scripts/test_validate.py
 
       - name: Parse Quadlet with Stage Podman
@@ -69,40 +83,28 @@ jobs:
             state.show_sls salt.services > "$RUNNER_TEMP/salt-services-render"
           test -s "$RUNNER_TEMP/salt-services-render"
 
-      - name: Check exact image manifest availability
+      - name: Check selected image availability
+        if: github.event_name == 'workflow_dispatch'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CADDY_IMAGE: docker.io/caddy:2.11.4-alpine
+          SYNAPSE_IMAGE: ghcr.io/telecrypt-io/telecrypt-synapse:${{ inputs.synapse_tag }}
+          MAS_IMAGE: ghcr.io/element-hq/matrix-authentication-service:1.23.0
+          CONTROLPLANE_IMAGE: ghcr.io/telecrypt-io/controlplane:${{ inputs.controlplane_tag }}
+          CASHIER_IMAGE: ghcr.io/telecrypt-io/telecrypt-cashier:${{ inputs.cashier_tag }}
+          LK_JWT_IMAGE: ghcr.io/element-hq/lk-jwt-service:0.7.0
         run: |
           set -euo pipefail
           authfile="$RUNNER_TEMP/server-state-podman-auth.json"
           trap 'rm -f -- "$authfile"' EXIT
           printf '%s' "$GITHUB_TOKEN" | podman login --authfile "$authfile" \
             --username "$GITHUB_ACTOR" --password-stdin ghcr.io
-          while IFS='=' read -r key image; do
-            skopeo inspect --authfile "$authfile" "docker://$image" >/dev/null
-          done < versions.env
+          for key in CADDY_IMAGE SYNAPSE_IMAGE MAS_IMAGE CONTROLPLANE_IMAGE CASHIER_IMAGE LK_JWT_IMAGE; do
+            skopeo inspect --authfile "$authfile" "docker://${!key}" >/dev/null
+          done
 
-      - name: Verify selected annotated release identity
-        id: release_identity
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_REF_NAME" =~ ^server-state-[0-9a-f]{7,10}$ ]]
-          release_tag_ref="refs/tags/$GITHUB_REF_NAME"
-          test "$(git cat-file -t "$release_tag_ref")" = tag
-          release_commit="$(git rev-parse "$release_tag_ref^{commit}")"
-          release_suffix="${GITHUB_REF_NAME#server-state-}"
-          [[ "$release_commit" == "$release_suffix"* ]]
-          test "$release_commit" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD)" = "$release_commit"
-          timeout --signal=TERM --kill-after=5s 30s git fetch --no-tags origin \
-            +refs/heads/main:refs/remotes/origin/main
-          git merge-base --is-ancestor "$release_commit" refs/remotes/origin/main
-          printf 'release_commit=%s\n' "$release_commit" >> "$GITHUB_OUTPUT"
-          printf 'annotated_tag_sha=%s\n' "$(git rev-parse "$release_tag_ref")" >> "$GITHUB_OUTPUT"
-
-  release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/server-state-')
+  assemble:
+    if: github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -110,38 +112,52 @@ jobs:
       contents: write
       packages: read
     env:
-      RELEASE_COMMIT: ${{ needs.validate.outputs.release_commit }}
-      RELEASE_ANNOTATED_TAG_SHA: ${{ needs.validate.outputs.annotated_tag_sha }}
+      CADDY_IMAGE: docker.io/caddy:2.11.4-alpine
+      SYNAPSE_IMAGE: ghcr.io/telecrypt-io/telecrypt-synapse:${{ inputs.synapse_tag }}
+      MAS_IMAGE: ghcr.io/element-hq/matrix-authentication-service:1.23.0
+      CONTROLPLANE_IMAGE: ghcr.io/telecrypt-io/controlplane:${{ inputs.controlplane_tag }}
+      CASHIER_IMAGE: ghcr.io/telecrypt-io/telecrypt-cashier:${{ inputs.cashier_tag }}
+      LK_JWT_IMAGE: ghcr.io/element-hq/lk-jwt-service:0.7.0
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify selected release checkout
-        id: selected_release_identity
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_REF_NAME" =~ ^server-state-[0-9a-f]{7,10}$ ]]
-          release_commit="${RELEASE_COMMIT:?validated release commit was not passed from the validation job}"
-          annotated_tag_sha="${RELEASE_ANNOTATED_TAG_SHA:?validated annotated tag was not passed from the validation job}"
-          release_tag_ref="refs/tags/$GITHUB_REF_NAME"
-          test "$GITHUB_SHA" = "$release_commit"
-          test "$(git rev-parse HEAD)" = "$release_commit"
-          test "$(git cat-file -t "$release_tag_ref")" = tag
-          test "$(git rev-parse "$release_tag_ref")" = "$annotated_tag_sha"
-          test "$(git rev-parse "$release_tag_ref^{commit}")" = "$release_commit"
-
-      - name: Create immutable GitHub Release
+      - name: Create the unique annotated Server State tag
+        id: release_identity
         env:
           GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_tag="server-state-${GITHUB_SHA:0:8}-${GITHUB_RUN_ID}"
+          [[ "$release_tag" =~ ^server-state-[0-9a-f]{7,10}-[1-9][0-9]*$ ]]
+          if git ls-remote --exit-code origin "refs/tags/$release_tag" >/dev/null 2>&1; then
+            echo "immutable Server State tag already exists: $release_tag" >&2
+            exit 1
+          fi
+          annotated_tag_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
+            -f tag="$release_tag" \
+            -f message="Server State $release_tag" \
+            -f object="$GITHUB_SHA" \
+            -f type=commit --jq .sha)"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/$release_tag" -f sha="$annotated_tag_sha" >/dev/null
+          printf 'release_tag=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
+          printf 'annotated_tag_sha=%s\n' "$annotated_tag_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve selected releases and write the immutable image manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release_identity.outputs.release_tag }}
+          RELEASE_ANNOTATED_TAG_SHA: ${{ steps.release_identity.outputs.annotated_tag_sha }}
         run: |
           set -euo pipefail
           source .github/scripts/container-helpers.sh
           authdir="$(mktemp -d)"
           authfile="$authdir/auth.json"
           metadata_dir="$(mktemp -d)"
-          manifest_name="server-state-${GITHUB_REF_NAME#server-state-}-images.json"
+          manifest_name="${RELEASE_TAG}-images.json"
           manifest_path="$RUNNER_TEMP/$manifest_name"
           cleanup() {
             rm -rf -- "$authdir" "$metadata_dir"
@@ -149,67 +165,43 @@ jobs:
           }
           trap cleanup EXIT
 
-          release_commit="$RELEASE_COMMIT"
           export SERVER_STATE_ANNOTATED_TAG_SHA="$RELEASE_ANNOTATED_TAG_SHA"
           python3 .github/scripts/validate.py manifest
+          METADATA_DIR="$metadata_dir" timeout --signal=TERM --kill-after=5s 240s \
+            .github/scripts/fetch_product_releases.sh
 
-          source versions.env
-          METADATA_DIR="$metadata_dir" timeout --signal=TERM --kill-after=5s 240s .github/scripts/fetch_product_releases.sh
           registry_token="$GH_TOKEN"
           unset GH_TOKEN
-          skopeo_login_output="$metadata_dir/skopeo-login.stdout"
-          if ! printf '%s' "$registry_token" | container_command --sensitive --inherit-stdin "$skopeo_login_output" 30 skopeo login --authfile "$authfile" \
-            --username "$GITHUB_ACTOR" --password-stdin ghcr.io; then
-            unset registry_token
-            rm -f -- "$skopeo_login_output" "$skopeo_login_output.stderr"
-            echo 'registry authentication failed' >&2
-            exit 1
-          fi
-          rm -f -- "$skopeo_login_output" "$skopeo_login_output.stderr"
-          for key in CADDY_IMAGE SYNAPSE_IMAGE MAS_IMAGE CONTROLPLANE_IMAGE LK_JWT_IMAGE CASHIER_IMAGE; do
+          printf '%s' "$registry_token" | container_command --sensitive --inherit-stdin \
+            "$metadata_dir/skopeo-login.stdout" 30 skopeo login --authfile "$authfile" \
+            --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+
+          for key in CADDY_IMAGE SYNAPSE_IMAGE MAS_IMAGE CONTROLPLANE_IMAGE CASHIER_IMAGE LK_JWT_IMAGE; do
             image="${!key}"
             name="$(python3 .github/scripts/validate.py image-name "$image")"
             repository="${image%:*}"
             digest_path="$metadata_dir/$key.tag-digest"
-            # Keep the selected registry index digest as the deployment coordinate and inspect its
-            # linux/amd64 image for the OCI config and provenance labels used by the release manifest.
             container_command "$digest_path" 60 skopeo inspect --authfile "$authfile" --no-tags --format '{{.Digest}}' \
               "docker://$image"
             resolved_digest="$(<"$digest_path")"
             [[ "$resolved_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
             resolved_image="docker://$repository@$resolved_digest"
             container_command "$metadata_dir/$name.metadata" 60 skopeo inspect --authfile "$authfile" --no-tags \
-              --override-os linux --override-arch amd64 --format '{{json .}}' \
-              "$resolved_image"
+              --override-os linux --override-arch amd64 --format '{{json .}}' "$resolved_image"
             container_command "$metadata_dir/$name.labels" 60 skopeo inspect --authfile "$authfile" \
-              --override-os linux --override-arch amd64 --format '{{json .Labels}}' \
-              "$resolved_image"
+              --override-os linux --override-arch amd64 --format '{{json .Labels}}' "$resolved_image"
             container_command "$metadata_dir/$name.config" 60 skopeo inspect --authfile "$authfile" --config \
-              --override-os linux --override-arch amd64 \
-              "$resolved_image"
+              --override-os linux --override-arch amd64 "$resolved_image"
           done
-          python3 .github/scripts/validate.py image-release-manifest \
-            "$metadata_dir" "$GITHUB_REF_NAME" "$manifest_path"
-          verify_registry_digests() {
-            for key in CADDY_IMAGE SYNAPSE_IMAGE MAS_IMAGE CONTROLPLANE_IMAGE LK_JWT_IMAGE CASHIER_IMAGE; do
-              image="${!key}"
-              expected_digest="$(jq -er --arg key "$key" '.images[$key].digest' "$manifest_path")"
-              digest_path="$metadata_dir/$key.digest"
-              container_command "$digest_path" 60 skopeo inspect \
-                --authfile "$authfile" --no-tags --format '{{.Digest}}' "docker://$image"
-              test "$(<"$digest_path")" = "$expected_digest"
-            done
-          }
-          verify_registry_digests
-          export GH_TOKEN="$registry_token"
 
-          gh release create "$GITHUB_REF_NAME" "$manifest_path" \
+          python3 .github/scripts/validate.py image-release-manifest \
+            "$metadata_dir" "$RELEASE_TAG" "$manifest_path"
+          export GH_TOKEN="$registry_token"
+          gh release create "$RELEASE_TAG" "$manifest_path" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" \
-            --notes "Server State image digest manifest for commit $release_commit." \
-            --target "$release_commit" \
+            --title "$RELEASE_TAG" \
+            --notes "Server State image digest manifest for commit $GITHUB_SHA." \
+            --target "$GITHUB_SHA" \
             --verify-tag
-          .github/scripts/verify-release.sh \
-            "$GITHUB_REF_NAME" "$manifest_name" "$manifest_path"
-          verify_registry_digests
+          .github/scripts/verify-release.sh "$RELEASE_TAG" "$manifest_name" "$manifest_path"
           unset GH_TOKEN registry_token

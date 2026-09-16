@@ -1,26 +1,14 @@
 {#
   The runtime layer is deliberately loaded after synapse.secrets.json. Synapse merges configuration
   shallowly by top-level key, so this file owns the complete public identity and rate-limit keys.
-  Stage is selected by its exact validated server name; every other supported deployment is the
-  production profile.
+  Rate limits and logging are explicit private pillar inputs for each deployment.
 #}
-{% if pillar["telecrypt"]["server_name"] == "stage.telecrypt.io" %}
-# Stage keeps the limiters immaterial to parallel acceptance tests.
 rc_message:
-  per_second: 1000
-  burst_count: 1000
+  per_second: {{ pillar["telecrypt"]["synapse_rate_limiting"]["message_per_second"] }}
+  burst_count: {{ pillar["telecrypt"]["synapse_rate_limiting"]["message_burst"] }}
 rc_room_creation:
-  per_second: 1000
-  burst_count: 1000
-{% else %}
-# Production uses finite request rates as its backstop.
-rc_message:
-  per_second: 0.2
-  burst_count: 10
-rc_room_creation:
-  per_second: 0.016
-  burst_count: 10
-{% endif %}
+  per_second: {{ pillar["telecrypt"]["synapse_rate_limiting"]["room_creation_per_second"] }}
+  burst_count: {{ pillar["telecrypt"]["synapse_rate_limiting"]["room_creation_burst"] }}
 
 # Modern client features (Element X / sliding sync / Element Call delay events), plus the
 # experimental MatrixRTC transport used by the standalone LiveKit JWT service. Synapse and the

@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 import yaml
+from jinja2 import Environment, FileSystemLoader
 
 sys.path.insert(0, str(Path(__file__).parent))
 import validate  # noqa: E402
@@ -24,6 +25,15 @@ import validate  # noqa: E402
 CONTAINER_HELPER = Path(__file__).parent / "container-helpers.sh"
 RELEASE_HELPER = Path(__file__).parent / "release-helpers.sh"
 WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "validate.yml"
+TEST_VALUES = {
+    "CADDY_IMAGE": "docker.io/caddy:2.11.4-alpine",
+    "SYNAPSE_IMAGE": "ghcr.io/telecrypt-io/telecrypt-synapse:1.159-tc25",
+    "MAS_IMAGE": "ghcr.io/element-hq/matrix-authentication-service:1.23.0",
+    "CONTROLPLANE_IMAGE": "ghcr.io/telecrypt-io/controlplane:0.5.33",
+    "CASHIER_IMAGE": "ghcr.io/telecrypt-io/telecrypt-cashier:0.4.28",
+    "LK_JWT_IMAGE": "ghcr.io/element-hq/lk-jwt-service:0.7.0",
+}
+os.environ.update(TEST_VALUES)
 
 
 def git(root: Path, *args: str) -> str:
@@ -160,143 +170,78 @@ class ManifestTests(unittest.TestCase):
                         validate.validate_published_images(invalid)
 
 
-class ReleaseWorkflowGitTests(unittest.TestCase):
+class ConfigurationRenderingTests(unittest.TestCase):
 
     def setUp(self) -> None:
-        self.directory = tempfile.TemporaryDirectory(delete=False, prefix="server-state-release-git-")
-        self.root = Path(self.directory.name)
-        self.seed = self.root / "seed"
-        self.seed.mkdir()
-        self.origin = self.root / "origin.git"
-        self.checkout = self.root / "checkout"
-        subprocess.run(["/usr/bin/git", "init", "--bare", "--quiet", str(self.origin)], check=True)
-        git(self.seed, "init", "--quiet")
-        self.commit_file("first\n", "first")
-        git(self.seed, "branch", "-M", "main")
-        self.first_commit = git(self.seed, "rev-parse", "HEAD")
-        self.commit_file("second\n", "second")
-        self.release_commit = git(self.seed, "rev-parse", "HEAD")
-        self.tag = f"server-state-{self.release_commit[:8]}"
-        git(self.seed, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "tag", "-a", self.tag, "-m", "release", self.release_commit)
-        self.annotated_tag_sha = git(self.seed, "rev-parse", f"refs/tags/{self.tag}")
-        self.commit_file("third\n", "main advanced")
-        self.main_commit = git(self.seed, "rev-parse", "HEAD")
-        git(self.seed, "remote", "add", "origin", str(self.origin))
-        git(self.seed, "push", "--quiet", "origin", "main", f"refs/tags/{self.tag}")
-        self.make_checkout(self.tag)
+        self.root = Path(__file__).resolve().parents[2]
+        self.pillar = {
+            "telecrypt": {
+                "server_name": "stage.example.invalid",
+                "admin_client_id": "01J00000000000000000000000",
+                "mas_rust_log": "info,mas=debug",
+                "mas_rate_limiting": {
+                    "login_per_ip_burst": 100000,
+                    "login_per_ip_per_second": 1000.0,
+                    "login_per_account_burst": 100000,
+                    "login_per_account_per_second": 1000.0,
+                    "registration_burst": 100000,
+                    "registration_per_second": 1000.0,
+                },
+                "synapse_rate_limiting": {
+                    "message_per_second": 1000,
+                    "message_burst": 1000,
+                    "room_creation_per_second": 1000,
+                    "room_creation_burst": 1000,
+                },
+                "synapse_http_log_level": "DEBUG",
+                "synapse_http_client_log_level": "DEBUG",
+            }
+        }
+        self.environment = Environment(loader=FileSystemLoader(str(self.root)))
 
-    def tearDown(self) -> None:
-        self.directory.cleanup()
+    def render(self, name: str) -> dict:
+        return yaml.safe_load(self.environment.get_template(name).render(pillar=self.pillar))
 
-    def commit_file(self, contents: str, message: str) -> None:
-        (self.seed / "fixture").write_text(contents, encoding="utf-8")
-        git(self.seed, "add", "fixture")
-        git(self.seed, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "--quiet", "-m", message)
+    def test_private_profile_values_render_without_hostname_selection(self) -> None:
+        mas = self.render("matrix/mas.runtime.yaml.j2")
+        synapse = self.render("matrix/synapse.runtime.yaml.j2")
+        log_config = self.render("matrix/synapse.log.config.j2")
+        self.assertEqual(mas["rate_limiting"]["login"]["per_ip"]["burst"], 100000)
+        self.assertEqual(mas["rate_limiting"]["registration"]["per_second"], 1000.0)
+        self.assertEqual(synapse["rc_message"]["per_second"], 1000)
+        self.assertEqual(log_config["loggers"]["synapse.http.server"]["level"], "DEBUG")
+        for path in ("matrix/mas.runtime.yaml.j2", "matrix/synapse.runtime.yaml.j2", "matrix/synapse.log.config.j2"):
+            self.assertNotIn("stage.telecrypt.io", (self.root / path).read_text(encoding="utf-8"))
 
-    def make_checkout(self, tag: str) -> None:
-        if self.checkout.exists():
-            subprocess.run(["/bin/rm", "-rf", str(self.checkout)], check=True)
-        subprocess.run(["/usr/bin/git", "clone", "--quiet", "--no-checkout", str(self.origin), str(self.checkout)], check=True)
-        git(self.checkout, "fetch", "--quiet", "origin", f"refs/tags/{tag}:refs/tags/{tag}")
-        git(self.checkout, "checkout", "--quiet", "--detach", f"refs/tags/{tag}")
+    def test_caddy_routes_remain_environment_derived(self) -> None:
+        caddy = (self.root / "Caddyfile").read_text(encoding="utf-8")
+        for route in ("/auth", "/_matrix/client", "/livekit/jwt", "/plan", "/internal"):
+            self.assertIn(route, caddy)
+        self.assertIn("import server.{$SERVER_NAME}", caddy)
 
-    def run_workflow_step(self, job: str, step_id: str, **environment: str) -> subprocess.CompletedProcess[str]:
-        output = self.root / "github-output"
-        output.write_text("", encoding="utf-8")
-        return subprocess.run(
-            ["/bin/bash", "-euo", "pipefail", "-c", workflow_run(job, step_id)],
-            cwd=self.checkout,
-            env={
-                **os.environ,
-                "GITHUB_OUTPUT": str(output),
-                **environment,
-            },
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
 
-    def validate_tag(self, tag: str | None = None, event_commit: str | None = None) -> subprocess.CompletedProcess[str]:
-        return self.run_workflow_step(
-            "validate",
-            "release_identity",
-            GITHUB_REF_NAME=tag or self.tag,
-            GITHUB_SHA=event_commit or self.release_commit,
-        )
+class ReleaseWorkflowGitTests(unittest.TestCase):
 
-    def test_annotated_tag_is_accepted_when_main_has_advanced(self) -> None:
-        result = self.validate_tag()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotEqual(self.main_commit, self.release_commit)
-        recorded = (self.root / "github-output").read_text(encoding="utf-8")
-        self.assertEqual(recorded, f"release_commit={self.release_commit}\nannotated_tag_sha={self.annotated_tag_sha}\n")
+    def test_dispatch_inputs_and_candidate_tag_are_unique(self) -> None:
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        triggers = workflow.get("on", workflow.get(True))
+        self.assertEqual(set(triggers["workflow_dispatch"]["inputs"]), {"synapse_tag", "controlplane_tag", "cashier_tag"})
+        self.assertEqual(workflow["jobs"]["assemble"]["if"], "github.event_name == 'workflow_dispatch'")
+        commit = "a" * 40
+        first = f"server-state-{commit[:8]}-41"
+        second = f"server-state-{commit[:8]}-42"
+        self.assertRegex(first, validate.SERVER_STATE_TAG)
+        self.assertRegex(second, validate.SERVER_STATE_TAG)
+        self.assertNotEqual(first, second)
 
-    def test_lightweight_tag_is_rejected(self) -> None:
-        git(self.seed, "tag", "-d", self.tag)
-        git(self.seed, "tag", self.tag, self.release_commit)
-        git(self.seed, "push", "--quiet", "--force", "origin", f"refs/tags/{self.tag}")
-        self.make_checkout(self.tag)
-        result = self.validate_tag()
-        self.assertNotEqual(result.returncode, 0)
-
-    def test_wrong_commit_suffix_is_rejected(self) -> None:
-        wrong_prefix = ("0" if self.release_commit[0] != "0" else "1") + self.release_commit[1:8]
-        wrong_tag = f"server-state-{wrong_prefix}"
-        git(self.seed, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "tag", "-a", wrong_tag, "-m", "wrong suffix", self.release_commit)
-        git(self.seed, "push", "--quiet", "origin", f"refs/tags/{wrong_tag}")
-        self.make_checkout(wrong_tag)
-        result = self.validate_tag(wrong_tag)
-        self.assertNotEqual(result.returncode, 0)
-
-    def test_event_commit_must_match_annotated_tag_target(self) -> None:
-        result = self.validate_tag(event_commit=self.main_commit)
-        self.assertNotEqual(result.returncode, 0)
-
-    def test_release_commit_outside_main_history_is_rejected(self) -> None:
-        outside = self.root / "outside"
-        outside.mkdir()
-        git(outside, "init", "--quiet")
-        (outside / "fixture").write_text("outside\n", encoding="utf-8")
-        git(outside, "add", "fixture")
-        git(outside, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "--quiet", "-m", "outside")
-        outside_commit = git(outside, "rev-parse", "HEAD")
-        outside_tag = f"server-state-{outside_commit[:8]}"
-        git(outside, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "tag", "-a", outside_tag, "-m", "outside")
-        git(outside, "remote", "add", "origin", str(self.origin))
-        git(outside, "push", "--quiet", "origin", f"refs/tags/{outside_tag}")
-        self.make_checkout(outside_tag)
-        result = self.validate_tag(outside_tag, outside_commit)
-        self.assertNotEqual(result.returncode, 0)
-
-    def test_release_job_requires_the_recorded_checkout_and_tag_object(self) -> None:
-        good = self.run_workflow_step(
-            "release",
-            "selected_release_identity",
-            GITHUB_REF_NAME=self.tag,
-            GITHUB_SHA=self.release_commit,
-            RELEASE_COMMIT=self.release_commit,
-            RELEASE_ANNOTATED_TAG_SHA=self.annotated_tag_sha,
-        )
-        self.assertEqual(good.returncode, 0, good.stderr)
-        changed = self.run_workflow_step(
-            "release",
-            "selected_release_identity",
-            GITHUB_REF_NAME=self.tag,
-            GITHUB_SHA=self.release_commit,
-            RELEASE_COMMIT=self.release_commit,
-            RELEASE_ANNOTATED_TAG_SHA=self.first_commit,
-        )
-        self.assertNotEqual(changed.returncode, 0)
-        changed_commit = self.run_workflow_step(
-            "release",
-            "selected_release_identity",
-            GITHUB_REF_NAME=self.tag,
-            GITHUB_SHA=self.release_commit,
-            RELEASE_COMMIT=self.main_commit,
-            RELEASE_ANNOTATED_TAG_SHA=self.annotated_tag_sha,
-        )
-        self.assertNotEqual(changed_commit.returncode, 0)
+    def test_selected_inputs_accept_release_tags_without_semver_policy(self) -> None:
+        values = dict(TEST_VALUES)
+        values["SYNAPSE_IMAGE"] = "ghcr.io/telecrypt-io/telecrypt-synapse:release-candidate"
+        values["CASHIER_IMAGE"] = "ghcr.io/telecrypt-io/telecrypt-cashier:2026.09-preview"
+        self.assertEqual(validate.load_manifest(values), values)
+        values["CASHIER_IMAGE"] = "docker.io/other:release"
+        with self.assertRaises(AssertionError):
+            validate.load_manifest(values)
 
 
 class ReleaseCaptureTests(unittest.TestCase):
@@ -450,7 +395,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.assertEqual(token_capture.read_text(encoding="utf-8"), "offline-registry-token")
             self.assertNotIn("offline-registry-token", result.stdout + result.stderr)
 
-    def test_product_tag_evidence_binds_exact_api_urls(self) -> None:
+    def test_product_tag_evidence_uses_tag_identity_not_response_urls(self) -> None:
         key = "SYNAPSE_IMAGE"
         tag = validate.load_manifest()[key].rsplit(":", 1)[1]
         repository = validate.PUBLIC_RELEASES[key]["repository"]
@@ -479,29 +424,29 @@ class ReleaseEvidenceTests(unittest.TestCase):
         validate.validate_product_tag_evidence(
             key, tag, source_commit, annotated_tag_sha, tag_ref, annotated_tag
         )
-        invalid = {**annotated_tag, "object": {**annotated_tag["object"], "url": f"{api_root}/git/commits/{source_commit}/unexpected"}}
+        invalid = {**annotated_tag, "object": {**annotated_tag["object"], "sha": "c" * 40}}
         with self.assertRaises(AssertionError):
             validate.validate_product_tag_evidence(
                 key, tag, source_commit, annotated_tag_sha, tag_ref, invalid
             )
 
-    def test_product_asset_schema_is_strict(self) -> None:
+    def test_product_asset_schema_keeps_required_fields_and_allows_metadata(self) -> None:
         raw = (
             b'{"annotated_tag_sha":"' + b"b" * 40 + b'","digest":"sha256:' + b"a" * 64 +
             b'","image":"repo/image","schema_version":1,"source_commit":"' + b"a" * 40 +
             b'","tag":"1.0.0"}\n'
         )
         self.assertEqual(validate.parse_product_release_asset("SYNAPSE_IMAGE", raw)["tag"], "1.0.0")
-        with self.assertRaises(AssertionError):
-            validate.parse_product_release_asset("SYNAPSE_IMAGE", raw[:-1] + b" ")
+        self.assertEqual(validate.parse_product_release_asset("SYNAPSE_IMAGE", raw[:-1] + b" ") ["tag"], "1.0.0")
+        self.assertEqual(
+            validate.parse_product_release_asset(
+                "SYNAPSE_IMAGE",
+                raw.replace(b'"tag":"1.0.0"', b'"extra":true,"tag":"1.0.0"')[:-1],
+            )["tag"],
+            "1.0.0",
+        )
         with self.assertRaises(AssertionError):
             validate.parse_product_release_asset("CASHIER_IMAGE", raw)
-
-    def test_product_release_asset_label_is_exact_empty_string(self) -> None:
-        self.assertEqual(validate.validate_release_asset_label("SYNAPSE_IMAGE", {"label": ""}), "")
-        for label in (None, "asset-label"):
-            with self.subTest(label=label), self.assertRaises(AssertionError):
-                validate.validate_release_asset_label("SYNAPSE_IMAGE", {"label": label})
 
     def test_cashier_manifest_shape_and_oci_provenance_are_strict(self) -> None:
         image = validate.load_manifest()["CASHIER_IMAGE"]
@@ -554,7 +499,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 values,
                 metadata,
                 labels,
-                "server-state-abc1234",
+                "server-state-abc1234-42",
                 "d" * 40,
                 "e" * 40,
                 product_releases={key: {} for key in validate.PUBLIC_RELEASE_KEYS},

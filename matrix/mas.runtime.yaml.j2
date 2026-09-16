@@ -3,26 +3,17 @@
   private client records in the JSON overlay while this file owns rates, public identity, and the
   Plan admin-client binding.
 #}
-{% if pillar["telecrypt"]["server_name"] == "stage.telecrypt.io" %}
-# Stage keeps authentication and registration throttling immaterial to parallel acceptance tests.
 rate_limiting:
   login:
     per_ip:
-      burst: 100000
-      per_second: 1000.0
+      burst: {{ pillar["telecrypt"]["mas_rate_limiting"]["login_per_ip_burst"] }}
+      per_second: {{ pillar["telecrypt"]["mas_rate_limiting"]["login_per_ip_per_second"] }}
     per_account:
-      burst: 100000
-      per_second: 1000.0
+      burst: {{ pillar["telecrypt"]["mas_rate_limiting"]["login_per_account_burst"] }}
+      per_second: {{ pillar["telecrypt"]["mas_rate_limiting"]["login_per_account_per_second"] }}
   registration:
-    burst: 100000
-    per_second: 1000.0
-{% else %}
-# Production retains a finite registration backstop.
-rate_limiting:
-  registration:
-    burst: 100
-    per_second: 2.0
-{% endif %}
+    burst: {{ pillar["telecrypt"]["mas_rate_limiting"]["registration_burst"] }}
+    per_second: {{ pillar["telecrypt"]["mas_rate_limiting"]["registration_per_second"] }}
 
 http:
   public_base: https://backend.{{ pillar["telecrypt"]["server_name"] }}/auth/

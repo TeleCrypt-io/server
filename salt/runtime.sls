@@ -3,7 +3,7 @@
 {% set runtime_dir = data_dir ~ "/runtime" %}
 {% set secrets_dir = data_dir ~ "/secrets" %}
 {% set deploy_state_dir = data_dir ~ "/deploy-state" %}
-{% set mas_rust_log = "info,mas=debug,async_graphql=debug,reqwest=debug,hyper_util=debug" if t["server_name"] == "stage.telecrypt.io" else "info" %}
+{% set mas_rust_log = t["mas_rust_log"] %}
 
 telecrypt-data-directory:
   file.directory:

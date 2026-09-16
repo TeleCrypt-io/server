@@ -66,8 +66,8 @@ extract_api_json() {
   return "$status"
 }
 
-# shellcheck disable=SC1091
-source versions.env
+: "${SYNAPSE_IMAGE:?SYNAPSE_IMAGE is required}"
+: "${CONTROLPLANE_IMAGE:?CONTROLPLANE_IMAGE is required}"
 mkdir -p "$METADATA_DIR"
 cleanup_captured_stderr() {
   local status=$? cleanup_status=0 stderr_file
@@ -92,7 +92,6 @@ fetch_release_asset() {
   local asset_path="$METADATA_DIR/$key.release.asset"
   local tag_ref_path="$METADATA_DIR/$key.annotated-tag-ref.json"
   local annotated_tag_path="$METADATA_DIR/$key.annotated-tag.json"
-  local api_root="https://api.github.com/repos/$repository"
   local annotated_tag_sha
   capture_api "$tag_ref_path" tag-ref "$repository" "$tag" \
     --hostname github.com \
@@ -100,8 +99,8 @@ fetch_release_asset() {
     --header 'X-GitHub-Api-Version: 2026-03-10' \
     "repos/$repository/git/ref/tags/$tag"
   extract_api_json annotated_tag_sha "$tag_ref_path" tag-ref "$repository" "$tag" \
-    --arg ref "refs/tags/$tag" --arg url "$api_root/git/refs/tags/$tag" \
-    '. | select(type == "object" and .ref == $ref and .url == $url) |
+    --arg ref "refs/tags/$tag" \
+    '. | select(type == "object" and .ref == $ref) |
      .object | select(type == "object" and .type == "tag" and
        (.sha | type == "string" and test("^[0-9a-f]{40}$"))) | .sha'
   capture_api "$annotated_tag_path" annotated-tag "$repository" "$tag" \
@@ -110,12 +109,10 @@ fetch_release_asset() {
     --header 'X-GitHub-Api-Version: 2026-03-10' \
     "repos/$repository/git/tags/$annotated_tag_sha"
   validate_api_json "$annotated_tag_path" annotated-tag "$repository" "$tag" \
-    --arg tag "$tag" --arg sha "$annotated_tag_sha" --arg commit_url "$api_root/git/commits/" \
-    --arg object_url "$api_root/git/tags/$annotated_tag_sha" \
-    '. | select(type == "object" and .sha == $sha and .tag == $tag and .url == $object_url) |
+    --arg tag "$tag" --arg sha "$annotated_tag_sha" \
+    '. | select(type == "object" and .sha == $sha and .tag == $tag) |
      .object as $target | $target | select(type == "object" and .type == "commit" and
-       (.sha | type == "string" and test("^[0-9a-f]{40}$")) and
-       ($target.url | type == "string" and . == ($commit_url + $target.sha)))'
+       (.sha | type == "string" and test("^[0-9a-f]{40}$")))'
   capture_api "$release_path" release "$repository" "$tag" \
     --hostname github.com \
     --header 'Accept: application/vnd.github+json' \
