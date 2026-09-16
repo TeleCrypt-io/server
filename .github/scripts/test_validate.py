@@ -27,7 +27,7 @@ RELEASE_HELPER = Path(__file__).parent / "release-helpers.sh"
 WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "validate.yml"
 TEST_VALUES = {
     "CADDY_IMAGE": "docker.io/caddy:2.11.4-alpine",
-    "SYNAPSE_IMAGE": "ghcr.io/telecrypt-io/telecrypt-synapse:1.159-tc26",
+    "SYNAPSE_IMAGE": "ghcr.io/telecrypt-io/telecrypt-synapse:1.159-tc27",
     "MAS_IMAGE": "ghcr.io/element-hq/matrix-authentication-service:1.23.0",
     "CONTROLPLANE_IMAGE": "ghcr.io/telecrypt-io/controlplane:0.5.35",
     "CASHIER_IMAGE": "ghcr.io/telecrypt-io/telecrypt-cashier:0.4.29",
