@@ -23,7 +23,7 @@ IMAGE_RULES = {
     "CASHIER_IMAGE": ("ghcr.io/telecrypt-io/telecrypt-cashier", r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"),
 }
 PRODUCT_RELEASES = {
-    "SYNAPSE_IMAGE": {"repository": "TeleCrypt-io/telecrypt-synapse", "asset_prefix": "telecrypt-synapse-"},
+    "SYNAPSE_IMAGE": {"repository": "TeleCrypt-io/synapse-server-container", "asset_prefix": "telecrypt-synapse-"},
     "CONTROLPLANE_IMAGE": {"repository": "TeleCrypt-io/control-plane", "asset_prefix": "controlplane-"},
     "CASHIER_IMAGE": {"repository": "TeleCrypt-io/cashier", "asset_prefix": "telecrypt-cashier-"},
 }
@@ -142,7 +142,7 @@ def validate_image_platform(metadata: object, config_document: object) -> None:
 
 
 def validate_synapse_provenance(inspect_labels: object, config_labels: object, version: str) -> None:
-    expected = {"org.opencontainers.image.source": "https://github.com/TeleCrypt-io/telecrypt-synapse", "org.opencontainers.image.version": version, "org.opencontainers.image.base.name": "ghcr.io/element-hq/synapse"}
+    expected = {"org.opencontainers.image.source": "https://github.com/TeleCrypt-io/synapse-server-container", "org.opencontainers.image.version": version, "org.opencontainers.image.base.name": "ghcr.io/element-hq/synapse"}
     for labels in (inspect_labels, config_labels):
         check(isinstance(labels, dict), "Synapse labels")
         check(set(SYNAPSE_LABELS) <= set(labels), "complete Synapse provenance")

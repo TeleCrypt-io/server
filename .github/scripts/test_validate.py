@@ -66,7 +66,7 @@ class ManifestTests(unittest.TestCase):
             {"os": "linux", "architecture": "amd64"},
         )
         labels = {
-            "org.opencontainers.image.source": "https://github.com/TeleCrypt-io/telecrypt-synapse",
+            "org.opencontainers.image.source": "https://github.com/TeleCrypt-io/synapse-server-container",
             "org.opencontainers.image.revision": "a" * 40,
             "org.opencontainers.image.version": "1.159-tc3",
             "org.opencontainers.image.base.name": "ghcr.io/element-hq/synapse",
@@ -92,7 +92,7 @@ class ManifestTests(unittest.TestCase):
         values["CONTROLPLANE_IMAGE"] = "ghcr.io/telecrypt-io/controlplane:0.5.18"
         digest = "sha256:" + "a" * 64
         synapse_labels = {
-            "org.opencontainers.image.source": "https://github.com/TeleCrypt-io/telecrypt-synapse",
+            "org.opencontainers.image.source": "https://github.com/TeleCrypt-io/synapse-server-container",
             "org.opencontainers.image.revision": "a" * 40,
             "org.opencontainers.image.version": values["SYNAPSE_IMAGE"].rsplit(":", 1)[1],
             "org.opencontainers.image.base.name": "ghcr.io/element-hq/synapse",
@@ -584,7 +584,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("phase=tag-ref", result.stderr)
-            self.assertIn("repository=TeleCrypt-io/telecrypt-synapse", result.stderr)
+            self.assertIn("repository=TeleCrypt-io/synapse-server-container", result.stderr)
             synapse_tag = fixture_values()["SYNAPSE_IMAGE"].rsplit(":", 1)[1]
             self.assertIn(f"tag={synapse_tag}", result.stderr)
             self.assertNotIn("offline-test-token", result.stdout + result.stderr)
