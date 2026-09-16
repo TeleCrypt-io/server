@@ -66,8 +66,6 @@ extract_api_json() {
   return "$status"
 }
 
-# shellcheck disable=SC1091
-source versions.env
 mkdir -p "$METADATA_DIR"
 cleanup_captured_stderr() {
   local status=$? cleanup_status=0 stderr_file
@@ -116,11 +114,6 @@ fetch_release_asset() {
      .object as $target | $target | select(type == "object" and .type == "commit" and
        (.sha | type == "string" and test("^[0-9a-f]{40}$")) and
        ($target.url | type == "string" and . == ($commit_url + $target.sha)))'
-  capture_api "$release_path" release "$repository" "$tag" \
-    --hostname github.com \
-    --header 'Accept: application/vnd.github+json' \
-    --header 'X-GitHub-Api-Version: 2026-03-10' \
-    "repos/$repository/releases/tags/$tag"
   local asset_id
   extract_api_json asset_id "$release_path" release "$repository" "$tag" \
     --arg asset "$asset_name" '.assets | map(select(.name == $asset)) |
@@ -156,7 +149,13 @@ fetch_release_asset() {
   fi
 }
 
-fetch_release_asset SYNAPSE_IMAGE "$SYNAPSE_IMAGE" TeleCrypt-io/telecrypt-synapse \
-  "telecrypt-synapse-${SYNAPSE_IMAGE##*:}.digest.json"
-fetch_release_asset CONTROLPLANE_IMAGE "$CONTROLPLANE_IMAGE" TeleCrypt-io/control-plane \
-  "controlplane-${CONTROLPLANE_IMAGE##*:}.digest.json"
+inputs="$METADATA_DIR/product-inputs"
+python3 .github/scripts/validate.py product-inputs "$METADATA_DIR" >"$inputs"
+while read -r key image repository asset; do
+  if [[ "$key" == CASHIER_IMAGE ]]; then
+    GH_TOKEN="${CASHIER_RELEASE_TOKEN:?private Cashier release token required}" \
+      fetch_release_asset "$key" "$image" "$repository" "$asset"
+  else
+    fetch_release_asset "$key" "$image" "$repository" "$asset"
+  fi
+done <"$inputs"
