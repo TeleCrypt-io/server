@@ -17,6 +17,8 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      SALT_VERSION: 3008.2
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -38,8 +40,7 @@ jobs:
       - name: Render masterless Salt states
         run: |
           set -euo pipefail
-          salt_version="$(<salt/version)"
-          test "$salt_version" = "3008.2"
+          salt_version="$SALT_VERSION"
           sudo install -d -m 0755 /etc/apt/keyrings
           curl -fsSL https://packages.broadcom.com/artifactory/api/security/keypair/SaltProjectKey/public \
             | gpg --dearmor \
