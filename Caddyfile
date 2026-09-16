@@ -1,38 +1,3 @@
-# Selected environment snippets. Caddy expands {$SERVER_NAME} before parsing the file, so the
-# snippets are defined here and the exact environment profile is selected below without a second
-# directory of one-file fragments.
-(global.stage.telecrypt.io) {
-	auto_https off
-	debug
-}
-
-(global.telecrypt.io) {
-	auto_https off
-}
-
-(server.stage.telecrypt.io) {
-	protocols h1
-	log_credentials
-}
-
-(server.telecrypt.io) {
-	protocols h1
-}
-
-(access-log.stage.telecrypt.io) {
-	format json
-}
-
-(access-log.telecrypt.io) {
-	format filter {
-		request>uri regexp "[?].*" "?[REDACTED]"
-		request>headers>Authorization delete
-		request>headers>Cookie delete
-		request>headers>Proxy-Authorization delete
-		resp_headers>Set-Cookie delete
-	}
-}
-
 # TeleCrypt.io — Caddy as a PLAIN-HTTP reverse proxy.
 #
 # TLS is terminated by an upstream reverse proxy, which forwards cleartext HTTP here. The `http://`
@@ -53,16 +18,16 @@
 # TLS / auto-HTTPS is FULLY disabled: HAProxy terminates TLS and forwards plain HTTP here.
 # `auto_https off` stops Caddy from provisioning ANY certificate, opening :443, or doing ACME —
 # it serves the HTTP port only and never exposes a domain via auto-SSL.
-{
-	import global.{$SERVER_NAME}
 
+{
+	auto_https off
 	servers {
 		trusted_proxies static {$TRUSTED_PROXY}
 		trusted_proxies_strict
 	}
 
 	servers :8080 {
-		import server.{$SERVER_NAME}
+		protocols h1
 	}
 }
 
@@ -78,11 +43,16 @@
 	}
 }
 
-# Access logging is selected by the exact environment profile. Production filters query and
-# credential data; Stage keeps the complete request/response record for acceptance diagnostics.
+# Keep query strings and credential headers out of the access log in every environment.
 (access_log) {
 	log {
-		import access-log.{$SERVER_NAME}
+		format filter {
+			request>uri regexp "[?].*" "?[REDACTED]"
+			request>headers>Authorization delete
+			request>headers>Cookie delete
+			request>headers>Proxy-Authorization delete
+			resp_headers>Set-Cookie delete
+		}
 	}
 }
 
@@ -143,8 +113,7 @@ http://{$SERVER_NAME}:8080 {
 		respond `{"m.server":"backend.{$SERVER_NAME}:443"}`
 	}
 
-	# The public website exists only for the production profile. Match the literal production
-	# identity so a stage deployment cannot redirect users or credentials into production.
+# The public website is served by the separate Pages deployment. Redirect only its apex here.
 	@production_apex host telecrypt.io
 	handle @production_apex {
 		# Drop the query string so callback codes or other secrets cannot be carried to the landing site.

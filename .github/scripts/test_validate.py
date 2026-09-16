@@ -217,7 +217,8 @@ class ConfigurationRenderingTests(unittest.TestCase):
         caddy = (self.root / "Caddyfile").read_text(encoding="utf-8")
         for route in ("/auth", "/_matrix/client", "/livekit/jwt", "/plan", "/internal"):
             self.assertIn(route, caddy)
-        self.assertIn("import server.{$SERVER_NAME}", caddy)
+        self.assertIn("servers :8080", caddy)
+        self.assertIn("protocols h1", caddy)
 
 
 class ReleaseWorkflowGitTests(unittest.TestCase):
