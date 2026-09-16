@@ -20,7 +20,7 @@ Environment=BILLING_ENVIRONMENT=${BILLING_ENVIRONMENT}
 Exec=/plan
 
 [Service]
-EnvironmentFile=/home/ubuntu/telecrypt-deployment.env
-EnvironmentFile=/home/ubuntu/telecrypt-images.env
+EnvironmentFile=/home/ubuntu/salt_config/telecrypt-deployment.env
+EnvironmentFile=/home/ubuntu/salt_config/telecrypt-images.env
 Restart=always
 RestartSec=2

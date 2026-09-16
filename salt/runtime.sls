@@ -63,7 +63,7 @@ telecrypt-synapse-staging-tmp-directory:
 
 telecrypt-deployment-environment:
   file.managed:
-    - name: /home/ubuntu/telecrypt-deployment.env
+    - name: {{ data_dir }}/telecrypt-deployment.env
     - contents: |
         TELECRYPT_DATA_DIR={{ t["data_dir"] }}
         SERVER_NAME={{ t["server_name"] }}

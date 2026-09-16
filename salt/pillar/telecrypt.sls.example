@@ -1,5 +1,5 @@
 telecrypt:
-  data_dir: /srv/telecrypt
+  data_dir: /home/ubuntu/salt_config
   server_name: stage.example.invalid
   billing_environment: test
   ingress_bind_address: 192.0.2.28

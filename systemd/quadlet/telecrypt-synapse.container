@@ -18,7 +18,7 @@ User=991:991
 ReadOnly=true
 DropCapability=ALL
 Environment=TMPDIR=/staging/tmp
-Volume=/home/ubuntu/telecrypt-current/matrix/synapse.yaml:/homeserver.yaml:ro
+Volume=/home/ubuntu/salt_config/current/matrix/synapse.yaml:/homeserver.yaml:ro
 Volume=${TELECRYPT_DATA_DIR}/runtime/synapse.runtime.yaml:/synapse-runtime.yaml:ro
 Volume=${TELECRYPT_DATA_DIR}/runtime/synapse.log.config:/log.config:ro
 Volume=${TELECRYPT_DATA_DIR}/secrets/synapse.secrets.json:/secrets.json:ro
@@ -32,7 +32,7 @@ HealthRetries=3
 HealthStartPeriod=15s
 
 [Service]
-EnvironmentFile=/home/ubuntu/telecrypt-deployment.env
-EnvironmentFile=/home/ubuntu/telecrypt-images.env
+EnvironmentFile=/home/ubuntu/salt_config/telecrypt-deployment.env
+EnvironmentFile=/home/ubuntu/salt_config/telecrypt-images.env
 Restart=always
 RestartSec=2

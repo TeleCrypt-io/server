@@ -1,3 +1,4 @@
+{% set data_dir = pillar["telecrypt"]["data_dir"] %}
 {% set unit_dir = "/home/ubuntu/.config/systemd/user" %}
 {% set quadlet_dir = "/home/ubuntu/.config/containers/systemd" %}
 
@@ -21,7 +22,7 @@ telecrypt-quadlet-directory:
 telecrypt-unit-link-{{ name|replace(".", "-") }}:
   file.symlink:
     - name: {{ unit_dir }}/{{ name }}
-    - target: /home/ubuntu/telecrypt-current/systemd/{{ name }}
+    - target: {{ data_dir }}/current/systemd/{{ name }}
     - user: ubuntu
     - group: ubuntu
     - force: true
@@ -34,7 +35,7 @@ telecrypt-unit-link-{{ name|replace(".", "-") }}:
 telecrypt-quadlet-link-{{ name|replace(".", "-") }}:
   file.symlink:
     - name: {{ quadlet_dir }}/{{ name }}
-    - target: /home/ubuntu/telecrypt-current/systemd/quadlet/{{ name }}
+    - target: {{ data_dir }}/current/systemd/quadlet/{{ name }}
     - user: ubuntu
     - group: ubuntu
     - force: true
