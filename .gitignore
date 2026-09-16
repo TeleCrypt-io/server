@@ -3,7 +3,6 @@
 # Private environment files
 .env
 *.env
-!versions.env
 
 # Host-local Salt pillar
 salt/pillar/telecrypt.sls
