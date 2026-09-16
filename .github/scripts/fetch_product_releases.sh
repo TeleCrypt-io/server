@@ -156,7 +156,7 @@ fetch_release_asset() {
   fi
 }
 
-fetch_release_asset SYNAPSE_IMAGE "$SYNAPSE_IMAGE" TeleCrypt-io/telecrypt-synapse \
+fetch_release_asset SYNAPSE_IMAGE "$SYNAPSE_IMAGE" TeleCrypt-io/synapse-server-container \
   "telecrypt-synapse-${SYNAPSE_IMAGE##*:}.digest.json"
 fetch_release_asset CONTROLPLANE_IMAGE "$CONTROLPLANE_IMAGE" TeleCrypt-io/control-plane \
   "controlplane-${CONTROLPLANE_IMAGE##*:}.digest.json"
