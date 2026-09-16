@@ -23,7 +23,7 @@ IMAGE_RULES = {
 }
 PUBLIC_RELEASES = {
     "SYNAPSE_IMAGE": {"repository": "TeleCrypt-io/telecrypt-synapse", "asset_prefix": "telecrypt-synapse-"},
-    "CONTROLPLANE_IMAGE": {"repository": "TeleCrypt-io/controlplane", "asset_prefix": "controlplane-"},
+    "CONTROLPLANE_IMAGE": {"repository": "TeleCrypt-io/control-plane", "asset_prefix": "controlplane-"},
 }
 PUBLIC_RELEASE_KEYS = frozenset(PUBLIC_RELEASES)
 IMAGE_RECORD_KEYS = frozenset({"digest", "image"})
@@ -140,7 +140,7 @@ def validate_published_images(directory: Path) -> None:
                 "org.opencontainers.image.source", "org.opencontainers.image.version",
                 "org.opencontainers.image.revision", "io.telecrypt.config-contract",
             )), (key, "label types"))
-            check(channel.get("org.opencontainers.image.source") == f"https://github.com/TeleCrypt-io/{'controlplane' if key == 'CONTROLPLANE_IMAGE' else 'cashier'}", (key, "source"))
+            check(channel.get("org.opencontainers.image.source") == f"https://github.com/TeleCrypt-io/{'control-plane' if key == 'CONTROLPLANE_IMAGE' else 'cashier'}", (key, "source"))
             check(channel.get("org.opencontainers.image.version") == version, (key, "version"))
             check(re.fullmatch(r"[0-9a-f]{40}", channel.get("org.opencontainers.image.revision", "")), (key, "revision"))
             check(channel.get("io.telecrypt.config-contract") == "1", (key, "config contract"))
@@ -360,7 +360,7 @@ def image_release_manifest(values: dict[str, str], metadata: dict[str, dict], la
             check(product_releases and product_assets and product_tag_refs and product_annotated_tags and key in product_releases and key in product_assets and key in product_tag_refs and key in product_annotated_tags, (key, "release evidence"))
             provenance = labels[key]
             check(type(provenance) is dict, (key, "provenance labels"))
-            expected_source = f"https://github.com/TeleCrypt-io/{'telecrypt-synapse' if key == 'SYNAPSE_IMAGE' else 'controlplane'}"
+            expected_source = f"https://github.com/TeleCrypt-io/{'telecrypt-synapse' if key == 'SYNAPSE_IMAGE' else 'control-plane'}"
             check(
                 type(provenance.get("org.opencontainers.image.source")) is str
                 and provenance["org.opencontainers.image.source"] == expected_source

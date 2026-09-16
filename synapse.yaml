@@ -1,6 +1,6 @@
 # Synapse — committed base config. Contains NO secrets.
 # The runtime loads this committed base first, then the exact SERVER_NAME-selected nonsecret profile,
-# the private JSON overlay, and finally the runtime identity layer. The Harness writes public
+# the private JSON overlay, and finally the runtime identity layer. The deployment process writes public
 # identity (server_name and public_baseurl) to that final runtime layer before activation.
 # Secret-bearing values remain private; reviewed nonsecret loader options are committed here.
 
@@ -70,7 +70,7 @@ user_types:
 
 # Fail-closed capability restrictions for unverified users (uploads, room cap, encryption).
 # Baked into the exact TeleCrypt Synapse image selected by Server State, which contains
-# the Controlplane policy-module wheel. Its source and tests live in controlplane.
+# the Controlplane policy-module wheel. Its source and tests live in the control-plane source tree.
 modules:
   - module: tier_controller.TierController
     config:

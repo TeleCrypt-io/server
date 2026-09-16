@@ -24,7 +24,7 @@ media_store/
 *.log
 *.pid
 
-# Python test artifacts (server/synapse/modules/tier_controller/ tests)
+# Python test artifacts (the Synapse policy-module tests)
 __pycache__/
 *.pyc
 .pytest_cache/

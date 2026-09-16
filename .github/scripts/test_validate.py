@@ -98,7 +98,7 @@ class ManifestTests(unittest.TestCase):
         }
         product_labels = {
             key: {
-                "org.opencontainers.image.source": f"https://github.com/TeleCrypt-io/{'controlplane' if key == 'CONTROLPLANE_IMAGE' else 'cashier'}",
+                "org.opencontainers.image.source": f"https://github.com/TeleCrypt-io/{'control-plane' if key == 'CONTROLPLANE_IMAGE' else 'cashier'}",
                 "org.opencontainers.image.version": values[key].rsplit(":", 1)[1],
                 "org.opencontainers.image.revision": "d" * 40,
                 "io.telecrypt.config-contract": "1",
@@ -529,7 +529,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
         metadata = {key: {"Name": image.rsplit(":", 1)[0], "Digest": digest} for key, image in values.items()}
         labels = {
             key: {
-                "org.opencontainers.image.source": f"https://github.com/TeleCrypt-io/{'telecrypt-synapse' if key == 'SYNAPSE_IMAGE' else 'controlplane'}",
+                "org.opencontainers.image.source": f"https://github.com/TeleCrypt-io/{'telecrypt-synapse' if key == 'SYNAPSE_IMAGE' else 'control-plane'}",
                 "org.opencontainers.image.version": image.rsplit(":", 1)[1],
                 "org.opencontainers.image.revision": "b" * 40,
             }

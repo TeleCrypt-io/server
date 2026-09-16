@@ -1,10 +1,10 @@
 # Matrix Authentication Service — committed base config. Contains NO secrets.
 # Secret-bearing top-level keys (secrets, database, matrix) and the two static client credentials
 # live in the gitignored JSON file. The exact SERVER_NAME-selected nonsecret profile owns the
-# registration rate. Both are merged after this base and before the final Harness identity layer,
+# registration rate. Both are merged after this base and before the final runtime identity layer,
 # which remains last so private configuration cannot replace public identity.
 #
-# The Harness writes http.public_base, http.issuer, and
+# The deployment process writes http.public_base, http.issuer, and
 # experimental.plan_management_iframe_uri to the runtime identity layer before activation.
 # The private overlay contains secrets plus the environment-bound database and client identities.
 # MAS's client list is kept in one layer because Figment concatenates arrays during admerge; its
@@ -36,7 +36,7 @@ http:
         - address: '127.0.0.1:8081'
       proxy_protocol: false
 
-  # Harness supplies public_base and issuer in the final identity layer. MAS uses the immediate
+  # The deployment process supplies public_base and issuer in the final identity layer. MAS uses the immediate
   # transport peer for IP-based rate limiting/logging and does not trust forwarded client-IP values
   # from Caddy or other services in the shared pod.
   trusted_proxies: []
@@ -74,7 +74,7 @@ email:
   transport: blackhole
 
 # Keep policy behavior in the committed base. The environment-bound Plan/Janitor admin client is added
-# by Harness's final runtime identity layer, not by the private secret overlay.
+# by the final runtime identity layer, not by the private secret overlay.
 policy:
   wasm_module: /usr/local/share/mas-cli/policy.wasm
   client_registration_entrypoint: client_registration/violation
@@ -84,7 +84,7 @@ policy:
   password_entrypoint: password/violation
   email_entrypoint: email/violation
 
-# clients: -> in mas.secrets.json (two exact client records; see Harness validation)
+# clients: -> in mas.secrets.json (two exact client records; see the validation workflow)
 
 branding:
   service_name: 'TeleCrypt.io'
