@@ -33,6 +33,6 @@ HealthStartPeriod=15s
 
 [Service]
 EnvironmentFile=/home/ubuntu/telecrypt-deployment.env
-EnvironmentFile=/home/ubuntu/telecrypt-current/images.env
+EnvironmentFile=/home/ubuntu/telecrypt-current/versions.env
 Restart=always
 RestartSec=2

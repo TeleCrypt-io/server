@@ -66,6 +66,8 @@ extract_api_json() {
   return "$status"
 }
 
+# shellcheck disable=SC1091
+source versions.env
 mkdir -p "$METADATA_DIR"
 cleanup_captured_stderr() {
   local status=$? cleanup_status=0 stderr_file
@@ -154,13 +156,7 @@ fetch_release_asset() {
   fi
 }
 
-inputs="$METADATA_DIR/product-inputs"
-python3 .github/scripts/validate.py product-inputs "$METADATA_DIR" >"$inputs"
-while read -r key image repository asset; do
-  if [[ "$key" == CASHIER_IMAGE ]]; then
-    GH_TOKEN="${CASHIER_RELEASE_TOKEN:?private Cashier release token required}" \
-      fetch_release_asset "$key" "$image" "$repository" "$asset"
-  else
-    fetch_release_asset "$key" "$image" "$repository" "$asset"
-  fi
-done <"$inputs"
+fetch_release_asset SYNAPSE_IMAGE "$SYNAPSE_IMAGE" TeleCrypt-io/synapse-server \
+  "telecrypt-synapse-${SYNAPSE_IMAGE##*:}.digest.json"
+fetch_release_asset CONTROLPLANE_IMAGE "$CONTROLPLANE_IMAGE" TeleCrypt-io/control-plane \
+  "controlplane-${CONTROLPLANE_IMAGE##*:}.digest.json"

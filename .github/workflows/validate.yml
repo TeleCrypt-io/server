@@ -3,7 +3,7 @@ name: validate
 on:
   push:
     branches: [main]
-  workflow_dispatch:
+    tags: ["server-state-*"]
 
 concurrency:
   group: server-state-${{ github.workflow }}-${{ github.ref }}
@@ -17,13 +17,17 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    env:
-      SALT_VERSION: 3008.2
+    outputs:
+      release_commit: ${{ steps.release_identity.outputs.release_commit }}
+      annotated_tag_sha: ${{ steps.release_identity.outputs.annotated_tag_sha }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Validate exact image manifest
+        run: python3 .github/scripts/validate.py manifest
 
       - name: Test image and release contracts
         run: python3 .github/scripts/test_validate.py
@@ -40,7 +44,8 @@ jobs:
       - name: Render masterless Salt states
         run: |
           set -euo pipefail
-          salt_version="$SALT_VERSION"
+          salt_version="$(<salt/version)"
+          test "$salt_version" = "3008.2"
           sudo install -d -m 0755 /etc/apt/keyrings
           curl -fsSL https://packages.broadcom.com/artifactory/api/security/keypair/SaltProjectKey/public \
             | gpg --dearmor \
@@ -64,72 +69,147 @@ jobs:
             state.show_sls salt.services > "$RUNNER_TEMP/salt-services-render"
           test -s "$RUNNER_TEMP/salt-services-render"
 
+      - name: Check exact image manifest availability
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          authfile="$RUNNER_TEMP/server-state-podman-auth.json"
+          trap 'rm -f -- "$authfile"' EXIT
+          printf '%s' "$GITHUB_TOKEN" | podman login --authfile "$authfile" \
+            --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+          while IFS='=' read -r key image; do
+            skopeo inspect --authfile "$authfile" "docker://$image" >/dev/null
+          done < versions.env
+
+      - name: Verify selected annotated release identity
+        id: release_identity
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^server-state-[0-9a-f]{7,10}$ ]]
+          release_tag_ref="refs/tags/$GITHUB_REF_NAME"
+          test "$(git cat-file -t "$release_tag_ref")" = tag
+          release_commit="$(git rev-parse "$release_tag_ref^{commit}")"
+          release_suffix="${GITHUB_REF_NAME#server-state-}"
+          [[ "$release_commit" == "$release_suffix"* ]]
+          test "$release_commit" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$release_commit"
+          timeout --signal=TERM --kill-after=5s 30s git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$release_commit" refs/remotes/origin/main
+          printf 'release_commit=%s\n' "$release_commit" >> "$GITHUB_OUTPUT"
+          printf 'annotated_tag_sha=%s\n' "$(git rev-parse "$release_tag_ref")" >> "$GITHUB_OUTPUT"
+
   release:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/server-state-')
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: write
       packages: read
+    env:
+      RELEASE_COMMIT: ${{ needs.validate.outputs.release_commit }}
+      RELEASE_ANNOTATED_TAG_SHA: ${{ needs.validate.outputs.annotated_tag_sha }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Resolve, validate and publish server release
+
+      - name: Verify selected release checkout
+        id: selected_release_identity
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^server-state-[0-9a-f]{7,10}$ ]]
+          release_commit="${RELEASE_COMMIT:?validated release commit was not passed from the validation job}"
+          annotated_tag_sha="${RELEASE_ANNOTATED_TAG_SHA:?validated annotated tag was not passed from the validation job}"
+          release_tag_ref="refs/tags/$GITHUB_REF_NAME"
+          test "$GITHUB_SHA" = "$release_commit"
+          test "$(git rev-parse HEAD)" = "$release_commit"
+          test "$(git cat-file -t "$release_tag_ref")" = tag
+          test "$(git rev-parse "$release_tag_ref")" = "$annotated_tag_sha"
+          test "$(git rev-parse "$release_tag_ref^{commit}")" = "$release_commit"
+
+      - name: Create immutable GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          CASHIER_RELEASE_TOKEN: ${{ secrets.CASHIER_RELEASE_TOKEN }}
         run: |
           set -euo pipefail
           source .github/scripts/container-helpers.sh
-          test "$GITHUB_REF" = refs/heads/main
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          tag="$(python3 -c 'import sys; sys.path.insert(0,".github/scripts"); import validate; print(validate.release_tag(*sys.argv[1:]))' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT")"
+          authdir="$(mktemp -d)"
+          authfile="$authdir/auth.json"
           metadata_dir="$(mktemp -d)"
-          authfile="$metadata_dir/auth.json"
-          manifest_name="$tag-images.json"
-          manifest_path="$metadata_dir/$manifest_name"
-          trap 'rm -rf -- "$metadata_dir"' EXIT
-          # An existing immutable result is consumed verbatim, never re-resolved.
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" >"$metadata_dir/release.json" 2>"$metadata_dir/release.stderr"; then
-            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$manifest_name" --dir "$metadata_dir"
-            jq -e --arg sha "$GITHUB_SHA" --arg tag "$tag" '.source_commit == $sha and .server_state_tag == $tag' "$manifest_path"
-            .github/scripts/verify-release.sh "$tag" "$manifest_name" "$manifest_path"
-            exit 0
-          elif ! grep -q '(HTTP 404)' "$metadata_dir/release.stderr"; then
-            cat "$metadata_dir/release.stderr" >&2
+          manifest_name="server-state-${GITHUB_REF_NAME#server-state-}-images.json"
+          manifest_path="$RUNNER_TEMP/$manifest_name"
+          cleanup() {
+            rm -rf -- "$authdir" "$metadata_dir"
+            rm -f -- "$manifest_path"
+          }
+          trap cleanup EXIT
+
+          release_commit="$RELEASE_COMMIT"
+          export SERVER_STATE_ANNOTATED_TAG_SHA="$RELEASE_ANNOTATED_TAG_SHA"
+          python3 .github/scripts/validate.py manifest
+
+          source versions.env
+          METADATA_DIR="$metadata_dir" timeout --signal=TERM --kill-after=5s 240s .github/scripts/fetch_product_releases.sh
+          registry_token="$GH_TOKEN"
+          unset GH_TOKEN
+          skopeo_login_output="$metadata_dir/skopeo-login.stdout"
+          if ! printf '%s' "$registry_token" | container_command --sensitive --inherit-stdin "$skopeo_login_output" 30 skopeo login --authfile "$authfile" \
+            --username "$GITHUB_ACTOR" --password-stdin ghcr.io; then
+            unset registry_token
+            rm -f -- "$skopeo_login_output" "$skopeo_login_output.stderr"
+            echo 'registry authentication failed' >&2
             exit 1
           fi
-          python3 .github/scripts/validate.py resolve "$metadata_dir"
-          METADATA_DIR="$metadata_dir" .github/scripts/fetch_product_releases.sh
-          python3 .github/scripts/validate.py selection-env "$metadata_dir" >"$metadata_dir/selection.env"
-          printf '%s' "$GH_TOKEN" | container_command --sensitive --inherit-stdin "$metadata_dir/login.stdout" 30 \
-            skopeo login --authfile "$authfile" --username "$GITHUB_ACTOR" --password-stdin ghcr.io
-          while IFS='=' read -r key image; do
+          rm -f -- "$skopeo_login_output" "$skopeo_login_output.stderr"
+          for key in CADDY_IMAGE SYNAPSE_IMAGE MAS_IMAGE CONTROLPLANE_IMAGE LK_JWT_IMAGE CASHIER_IMAGE; do
+            image="${!key}"
             name="$(python3 .github/scripts/validate.py image-name "$image")"
             repository="${image%:*}"
-            container_command "$metadata_dir/$key.tag-digest" 60 skopeo inspect --authfile "$authfile" \
-              --no-tags --format '{{.Digest}}' "docker://$image"
-            resolved_digest="$(<"$metadata_dir/$key.tag-digest")"
+            digest_path="$metadata_dir/$key.tag-digest"
+            # Keep the selected registry index digest as the deployment coordinate and inspect its
+            # linux/amd64 image for the OCI config and provenance labels used by the release manifest.
+            container_command "$digest_path" 60 skopeo inspect --authfile "$authfile" --no-tags --format '{{.Digest}}' \
+              "docker://$image"
+            resolved_digest="$(<"$digest_path")"
             [[ "$resolved_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
             resolved_image="docker://$repository@$resolved_digest"
             container_command "$metadata_dir/$name.metadata" 60 skopeo inspect --authfile "$authfile" --no-tags \
-              --override-os linux --override-arch amd64 --format '{{json .}}' "$resolved_image"
+              --override-os linux --override-arch amd64 --format '{{json .}}' \
+              "$resolved_image"
             container_command "$metadata_dir/$name.labels" 60 skopeo inspect --authfile "$authfile" \
-              --override-os linux --override-arch amd64 --format '{{json .Labels}}' "$resolved_image"
+              --override-os linux --override-arch amd64 --format '{{json .Labels}}' \
+              "$resolved_image"
             container_command "$metadata_dir/$name.config" 60 skopeo inspect --authfile "$authfile" --config \
-              --override-os linux --override-arch amd64 "$resolved_image"
-          done <"$metadata_dir/selection.env"
-          # Validate the complete manifest before creating its annotated tag.
-          export SERVER_STATE_ANNOTATED_TAG_SHA=0000000000000000000000000000000000000000
-          python3 .github/scripts/validate.py image-release-manifest "$metadata_dir" "$tag" "$manifest_path"
-          tag_object="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
-            -f tag="$tag" -f message="Server release $tag" -f object="$GITHUB_SHA" -f type=commit --jq .sha)"
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$tag_object"
-          export SERVER_STATE_ANNOTATED_TAG_SHA="$tag_object"
-          python3 .github/scripts/validate.py image-release-manifest "$metadata_dir" "$tag" "$manifest_path"
-          gh release create "$tag" "$manifest_path" --repo "$GITHUB_REPOSITORY" \
-            --title "$tag" --notes "Resolved server images for commit $GITHUB_SHA." --verify-tag
-          .github/scripts/verify-release.sh "$tag" "$manifest_name" "$manifest_path"
+              --override-os linux --override-arch amd64 \
+              "$resolved_image"
+          done
+          python3 .github/scripts/validate.py image-release-manifest \
+            "$metadata_dir" "$GITHUB_REF_NAME" "$manifest_path"
+          verify_registry_digests() {
+            for key in CADDY_IMAGE SYNAPSE_IMAGE MAS_IMAGE CONTROLPLANE_IMAGE LK_JWT_IMAGE CASHIER_IMAGE; do
+              image="${!key}"
+              expected_digest="$(jq -er --arg key "$key" '.images[$key].digest' "$manifest_path")"
+              digest_path="$metadata_dir/$key.digest"
+              container_command "$digest_path" 60 skopeo inspect \
+                --authfile "$authfile" --no-tags --format '{{.Digest}}' "docker://$image"
+              test "$(<"$digest_path")" = "$expected_digest"
+            done
+          }
+          verify_registry_digests
+          export GH_TOKEN="$registry_token"
+
+          gh release create "$GITHUB_REF_NAME" "$manifest_path" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Server State image digest manifest for commit $release_commit." \
+            --target "$release_commit" \
+            --verify-tag
+          .github/scripts/verify-release.sh \
+            "$GITHUB_REF_NAME" "$manifest_name" "$manifest_path"
+          verify_registry_digests
+          unset GH_TOKEN registry_token
