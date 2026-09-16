@@ -1,9 +1,6 @@
 {% set unit_dir = "/home/ubuntu/.config/systemd/user" %}
 {% set quadlet_dir = "/home/ubuntu/.config/containers/systemd" %}
 
-include:
-  - salt.account
-
 telecrypt-user-unit-directory:
   file.directory:
     - name: {{ unit_dir }}
@@ -11,8 +8,6 @@ telecrypt-user-unit-directory:
     - group: ubuntu
     - mode: '0700'
     - makedirs: true
-    - require:
-      - user: telecrypt-operator
 
 telecrypt-quadlet-directory:
   file.directory:
@@ -21,8 +16,6 @@ telecrypt-quadlet-directory:
     - group: ubuntu
     - mode: '0775'
     - makedirs: true
-    - require:
-      - user: telecrypt-operator
 
 {% for name in ("telecrypt-pod.service", "telecrypt.target", "telecrypt-janitor.service") %}
 telecrypt-unit-link-{{ name|replace(".", "-") }}:

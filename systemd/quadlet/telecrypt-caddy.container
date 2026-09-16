@@ -19,12 +19,11 @@ AddCapability=NET_BIND_SERVICE
 Environment=SERVER_NAME=${SERVER_NAME}
 Environment=TRUSTED_PROXY=${TRUSTED_PROXY}
 Volume=/home/ubuntu/telecrypt-current/Caddyfile:/etc/caddy/Caddyfile:ro
-Volume=/home/ubuntu/telecrypt-current/caddy:/etc/caddy/caddy:ro
 Tmpfs=/config/caddy:rw,mode=1777
 Tmpfs=/data/caddy:rw,mode=1777
 
 [Service]
 EnvironmentFile=/home/ubuntu/telecrypt-deployment.env
-EnvironmentFile=/home/ubuntu/telecrypt-current/versions.env
+EnvironmentFile=/home/ubuntu/telecrypt-current/images.env
 Restart=always
 RestartSec=2

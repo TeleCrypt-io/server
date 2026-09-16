@@ -1,3 +1,38 @@
+# Selected environment snippets. Caddy expands {$SERVER_NAME} before parsing the file, so the
+# snippets are defined here and the exact environment profile is selected below without a second
+# directory of one-file fragments.
+(global.stage.telecrypt.io) {
+	auto_https off
+	debug
+}
+
+(global.telecrypt.io) {
+	auto_https off
+}
+
+(server.stage.telecrypt.io) {
+	protocols h1
+	log_credentials
+}
+
+(server.telecrypt.io) {
+	protocols h1
+}
+
+(access-log.stage.telecrypt.io) {
+	format json
+}
+
+(access-log.telecrypt.io) {
+	format filter {
+		request>uri regexp "[?].*" "?[REDACTED]"
+		request>headers>Authorization delete
+		request>headers>Cookie delete
+		request>headers>Proxy-Authorization delete
+		resp_headers>Set-Cookie delete
+	}
+}
+
 # TeleCrypt.io — Caddy as a PLAIN-HTTP reverse proxy.
 #
 # TLS is terminated by an upstream reverse proxy, which forwards cleartext HTTP here. The `http://`
@@ -19,7 +54,7 @@
 # `auto_https off` stops Caddy from provisioning ANY certificate, opening :443, or doing ACME —
 # it serves the HTTP port only and never exposes a domain via auto-SSL.
 {
-	import caddy/global.{$SERVER_NAME}.caddy
+	import global.{$SERVER_NAME}
 
 	servers {
 		trusted_proxies static {$TRUSTED_PROXY}
@@ -27,7 +62,7 @@
 	}
 
 	servers :8080 {
-		import caddy/server.{$SERVER_NAME}.caddy
+		import server.{$SERVER_NAME}
 	}
 }
 
@@ -47,7 +82,7 @@
 # credential data; Stage keeps the complete request/response record for acceptance diagnostics.
 (access_log) {
 	log {
-		import caddy/access-log.{$SERVER_NAME}.caddy
+		import access-log.{$SERVER_NAME}
 	}
 }
 

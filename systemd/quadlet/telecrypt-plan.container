@@ -21,6 +21,6 @@ Exec=/plan
 
 [Service]
 EnvironmentFile=/home/ubuntu/telecrypt-deployment.env
-EnvironmentFile=/home/ubuntu/telecrypt-current/versions.env
+EnvironmentFile=/home/ubuntu/telecrypt-current/images.env
 Restart=always
 RestartSec=2

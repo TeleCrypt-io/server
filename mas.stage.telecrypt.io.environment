@@ -1,3 +1,0 @@
-# Keep general output at INFO and increase only MAS and the HTTP/GraphQL client/server modules
-# needed to diagnose Stage authentication failures.
-RUST_LOG=info,mas=debug,async_graphql=debug,reqwest=debug,hyper_util=debug

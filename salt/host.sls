@@ -1,8 +1,11 @@
 include:
-  - salt.account
   - salt.runtime
-  - salt.ssh
   - salt.units
+
+telecrypt-operator:
+  user.present:
+    - name: ubuntu
+    - remove_groups: false
 
 telecrypt-runtime-packages:
   pkg.installed:
@@ -56,3 +59,35 @@ salt-minion-stopped:
     - enable: false
     - require:
       - pkg: telecrypt-runtime-packages
+
+telecrypt-sshd-drop-in:
+  file.managed:
+    - name: /etc/ssh/sshd_config.d/90-telecrypt-hardening.conf
+    - contents: |
+        PermitRootLogin no
+        PubkeyAuthentication yes
+        PasswordAuthentication no
+        KbdInteractiveAuthentication no
+        X11Forwarding no
+        AllowUsers ubuntu
+        AllowAgentForwarding no
+        AllowTcpForwarding no
+    - user: root
+    - group: root
+    - mode: '0644'
+    - check_cmd: /usr/sbin/sshd -t -f
+    - show_changes: false
+    - require:
+      - pkg: telecrypt-runtime-packages
+
+telecrypt-sshd-effective-validation:
+  cmd.run:
+    - name: /usr/sbin/sshd -t
+    - onchanges:
+      - file: telecrypt-sshd-drop-in
+
+telecrypt-sshd-reload:
+  cmd.run:
+    - name: systemctl reload ssh.service
+    - onchanges:
+      - cmd: telecrypt-sshd-effective-validation

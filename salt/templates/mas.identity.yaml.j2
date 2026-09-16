@@ -1,9 +1,0 @@
-http:
-  public_base: https://backend.{{ pillar["telecrypt"]["server_name"] }}/auth/
-  issuer: https://backend.{{ pillar["telecrypt"]["server_name"] }}/auth/
-experimental:
-  plan_management_iframe_uri: https://backend.{{ pillar["telecrypt"]["server_name"] }}/plan
-policy:
-  data:
-    admin_clients:
-      - {{ pillar["telecrypt"]["admin_client_id"] }}

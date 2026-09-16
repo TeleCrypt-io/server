@@ -1,0 +1,27 @@
+{#
+  The runtime layer is deliberately loaded after synapse.secrets.json. Synapse merges configuration
+  shallowly by top-level key, so this file owns the complete public identity and rate-limit keys.
+  Stage is selected by its exact validated server name; every other supported deployment is the
+  production profile.
+#}
+{% if pillar["telecrypt"]["server_name"] == "stage.telecrypt.io" %}
+# Stage keeps the limiters immaterial to parallel acceptance tests.
+rc_message:
+  per_second: 1000
+  burst_count: 1000
+rc_room_creation:
+  per_second: 1000
+  burst_count: 1000
+{% else %}
+# Production uses finite request rates as its backstop.
+rc_message:
+  per_second: 0.2
+  burst_count: 10
+rc_room_creation:
+  per_second: 0.016
+  burst_count: 10
+{% endif %}
+
+# Keep public identity last so it cannot be replaced by a private overlay.
+server_name: {{ pillar["telecrypt"]["server_name"] }}
+public_baseurl: https://backend.{{ pillar["telecrypt"]["server_name"] }}/

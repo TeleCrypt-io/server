@@ -1,11 +1,11 @@
 # Matrix Authentication Service — committed base config. Contains NO secrets.
 # Secret-bearing top-level keys (secrets, database, matrix) and the two static client credentials
-# live in the gitignored JSON file. The exact SERVER_NAME-selected nonsecret profile owns the
-# registration rate. Both are merged after this base and before the final runtime identity layer,
-# which remains last so private configuration cannot replace public identity.
+# live in the gitignored JSON file. The exact SERVER_NAME-selected nonsecret profile and public
+# identity are rendered together in the final runtime layer, which remains last so private
+# configuration cannot replace public identity.
 #
-# The deployment process writes http.public_base, http.issuer, and
-# experimental.plan_management_iframe_uri to the runtime identity layer before activation.
+# The deployment process renders http.public_base, http.issuer, and
+# experimental.plan_management_iframe_uri in the final runtime layer before activation.
 # The private overlay contains secrets plus the environment-bound database and client identities.
 # MAS's client list is kept in one layer because Figment concatenates arrays during admerge; its
 # nonsecret auth method and redirect choices therefore stay beside those client secrets.
@@ -74,7 +74,7 @@ email:
   transport: blackhole
 
 # Keep policy behavior in the committed base. The environment-bound Plan/Janitor admin client is added
-# by the final runtime identity layer, not by the private secret overlay.
+# by the final runtime layer, not by the private secret overlay.
 policy:
   wasm_module: /usr/local/share/mas-cli/policy.wasm
   client_registration_entrypoint: client_registration/violation

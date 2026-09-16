@@ -9,10 +9,12 @@ handlers:
 loggers:
   synapse.storage.SQL:
     level: INFO
+{% if pillar["telecrypt"]["server_name"] == "stage.telecrypt.io" %}
   synapse.http.server:
     level: DEBUG
   synapse.http.client:
     level: DEBUG
+{% endif %}
   twisted:
     handlers:
       - console

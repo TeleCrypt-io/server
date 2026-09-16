@@ -1,7 +1,7 @@
 # Synapse — committed base config. Contains NO secrets.
-# The runtime loads this committed base first, then the exact SERVER_NAME-selected nonsecret profile,
-# the private JSON overlay, and finally the runtime identity layer. The deployment process writes public
-# identity (server_name and public_baseurl) to that final runtime layer before activation.
+# The runtime loads this committed base first, then the private JSON overlay, and finally the exact
+# SERVER_NAME-selected profile and public identity from matrix/synapse.runtime.yaml. The deployment
+# process renders that final runtime layer before activation.
 # Secret-bearing values remain private; reviewed nonsecret loader options are committed here.
 
 signing_key_path: "/signing.key"          # provided from TELECRYPT_DATA_DIR/secrets (never committed)
@@ -28,9 +28,9 @@ listeners:
       - names: [client]              # client resource includes client + media APIs; federation disabled
         compress: false
 
-# server_name and public_baseurl: -> in the runtime identity layer. The selected profile contains
-# only the environment's explicit rc_message limits. The complete database map (driver plus args)
-# and complete matrix_authentication_service map (enabled, endpoint, and secret) are supplied by
+# server_name, public_baseurl, and the environment's explicit rc_message limits are supplied by the
+# final runtime layer. The complete database map (driver plus args) and complete
+# matrix_authentication_service map (enabled, endpoint, and secret) are supplied by
 # synapse.secrets.json. Synapse's config files are shallow-merged by top-level key; keeping partial
 # maps here would silently discard required fields from the private map.
 
@@ -69,7 +69,7 @@ user_types:
     - verified
 
 # Fail-closed capability restrictions for unverified users (uploads, room cap, encryption).
-# Baked into the exact TeleCrypt Synapse image selected by Server State, which contains
+# Baked into the exact TeleCrypt Synapse image selected by the server release, which contains
 # the Controlplane policy-module wheel. Its source and tests live in the control-plane source tree.
 modules:
   - module: tier_controller.TierController

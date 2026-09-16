@@ -1,2 +1,0 @@
-# Keep the production listener HTTP/1 only.
-protocols h1

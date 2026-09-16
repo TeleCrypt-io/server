@@ -3,6 +3,7 @@
 {% set runtime_dir = data_dir ~ "/runtime" %}
 {% set secrets_dir = data_dir ~ "/secrets" %}
 {% set deploy_state_dir = data_dir ~ "/deploy-state" %}
+{% set mas_rust_log = "info,mas=debug,async_graphql=debug,reqwest=debug,hyper_util=debug" if t["server_name"] == "stage.telecrypt.io" else "info" %}
 
 telecrypt-data-directory:
   file.directory:
@@ -63,8 +64,12 @@ telecrypt-synapse-staging-tmp-directory:
 telecrypt-deployment-environment:
   file.managed:
     - name: /home/ubuntu/telecrypt-deployment.env
-    - source: salt://salt/templates/deployment.env.j2
-    - template: jinja
+    - contents: |
+        TELECRYPT_DATA_DIR={{ t["data_dir"] }}
+        SERVER_NAME={{ t["server_name"] }}
+        BILLING_ENVIRONMENT={{ t["billing_environment"] }}
+        INGRESS_BIND_ADDRESS={{ t["ingress_bind_address"] }}
+        TRUSTED_PROXY={{ t["trusted_proxy"] }}
     - user: ubuntu
     - group: ubuntu
     - mode: '0600'
@@ -72,10 +77,10 @@ telecrypt-deployment-environment:
     - require:
       - user: telecrypt-operator
 
-telecrypt-synapse-runtime-identity:
+telecrypt-synapse-runtime:
   file.managed:
-    - name: {{ runtime_dir }}/synapse.identity.yaml
-    - source: salt://salt/templates/synapse.identity.yaml.j2
+    - name: {{ runtime_dir }}/synapse.runtime.yaml
+    - source: salt://matrix/synapse.runtime.yaml.j2
     - template: jinja
     - user: ubuntu
     - group: ubuntu
@@ -84,11 +89,35 @@ telecrypt-synapse-runtime-identity:
     - require:
       - file: telecrypt-runtime-directory
 
-telecrypt-mas-runtime-identity:
+telecrypt-synapse-log-config:
   file.managed:
-    - name: {{ runtime_dir }}/mas.identity.yaml
-    - source: salt://salt/templates/mas.identity.yaml.j2
+    - name: {{ runtime_dir }}/synapse.log.config
+    - source: salt://matrix/synapse.log.config.j2
     - template: jinja
+    - user: ubuntu
+    - group: ubuntu
+    - mode: '0644'
+    - show_changes: false
+    - require:
+      - file: telecrypt-runtime-directory
+
+telecrypt-mas-runtime:
+  file.managed:
+    - name: {{ runtime_dir }}/mas.runtime.yaml
+    - source: salt://matrix/mas.runtime.yaml.j2
+    - template: jinja
+    - user: ubuntu
+    - group: ubuntu
+    - mode: '0644'
+    - show_changes: false
+    - require:
+      - file: telecrypt-runtime-directory
+
+telecrypt-mas-environment:
+  file.managed:
+    - name: {{ runtime_dir }}/mas.environment
+    - contents: |
+        RUST_LOG={{ mas_rust_log }}
     - user: ubuntu
     - group: ubuntu
     - mode: '0644'

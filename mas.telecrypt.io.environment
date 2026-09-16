@@ -1,2 +1,0 @@
-# Synapse's MAS image defaults to INFO; keep production's effective logging level unchanged.
-RUST_LOG=info

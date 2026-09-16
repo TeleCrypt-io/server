@@ -1,8 +1,0 @@
-# Production access logs continue to omit query and credential data.
-format filter {
-	request>uri regexp "[?].*" "?[REDACTED]"
-	request>headers>Authorization delete
-	request>headers>Cookie delete
-	request>headers>Proxy-Authorization delete
-	resp_headers>Set-Cookie delete
-}
