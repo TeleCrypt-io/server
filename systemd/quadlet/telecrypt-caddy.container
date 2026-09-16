@@ -13,7 +13,6 @@ Image=${CADDY_IMAGE}
 PodmanArgs=--pod=telecrypt
 PodmanArgs=--security-opt=no-new-privileges
 PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/dodo-webhook.env
-PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/livekit.secrets.env
 Pull=never
 User=65532:65532
 ReadOnly=true
