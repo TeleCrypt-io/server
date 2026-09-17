@@ -86,7 +86,7 @@ http://backend.{$SERVER_NAME}:8080 {
 	@mas_compat path_regexp ^/_matrix/client/[^/]+/(logout|refresh)/?$
 	@synapse path /_matrix/*
 	@redpill path /redpill
-	@plan path /plan /plan/*
+	@plan path /plan/*
 	@cashier path {$DODO_WEBHOOK_PATH}
 	@lk_jwt path /sfu/get /get_token /delegate_delayed_leave /sfu_webhook /healthz
 	@mas {
