@@ -2,6 +2,8 @@ include:
   - salt.runtime
   - salt.units
 
+{% set operator = pillar["telecrypt"]["operator"] %}
+
 telecrypt-operator:
   user.present:
     - name: ubuntu
@@ -58,7 +60,7 @@ telecrypt-subuid:
   file.replace:
     - name: /etc/subuid
     - pattern: '^ubuntu:[0-9]+:[0-9]+$'
-    - repl: 'ubuntu:{{ pillar["telecrypt"]["subuid_start"] }}:{{ pillar["telecrypt"]["subordinate_count"] }}'
+    - repl: 'ubuntu:{{ operator["subuid_start"] }}:{{ operator["subordinate_count"] }}'
     - count: 1
     - append_if_not_found: true
     - backup: false
@@ -71,7 +73,7 @@ telecrypt-subgid:
   file.replace:
     - name: /etc/subgid
     - pattern: '^ubuntu:[0-9]+:[0-9]+$'
-    - repl: 'ubuntu:{{ pillar["telecrypt"]["subgid_start"] }}:{{ pillar["telecrypt"]["subordinate_count"] }}'
+    - repl: 'ubuntu:{{ operator["subgid_start"] }}:{{ operator["subordinate_count"] }}'
     - count: 1
     - append_if_not_found: true
     - backup: false

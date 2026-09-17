@@ -1,14 +1,15 @@
+{% set vars = pillar["telecrypt"] %}
 {#
   The runtime layer is deliberately loaded after synapse.secrets.json. Synapse merges configuration
   shallowly by top-level key, so this file owns the complete public identity and rate-limit keys.
   Rate limits and logging are explicit private pillar inputs for each deployment.
 #}
 rc_message:
-  per_second: {{ pillar["telecrypt"]["synapse_rate_limiting"]["message_per_second"] }}
-  burst_count: {{ pillar["telecrypt"]["synapse_rate_limiting"]["message_burst"] }}
+  per_second: {{ vars["synapse"]["message_per_second"] }}
+  burst_count: {{ vars["synapse"]["message_burst"] }}
 rc_room_creation:
-  per_second: {{ pillar["telecrypt"]["synapse_rate_limiting"]["room_creation_per_second"] }}
-  burst_count: {{ pillar["telecrypt"]["synapse_rate_limiting"]["room_creation_burst"] }}
+  per_second: {{ vars["synapse"]["room_creation_per_second"] }}
+  burst_count: {{ vars["synapse"]["room_creation_burst"] }}
 
 # Modern client features (Element X / sliding sync / Element Call delay events), plus the
 # experimental MatrixRTC transport used by the standalone LiveKit JWT service. Synapse and the
@@ -22,8 +23,8 @@ experimental_features:
 matrix_rtc:
   transports:
     - type: livekit
-      livekit_service_url: https://backend.{{ pillar["telecrypt"]["server_name"] }}
+      livekit_service_url: https://backend.{{ vars["server"]["name"] }}
 
 # Keep public identity last so it cannot be replaced by a private overlay.
-server_name: {{ pillar["telecrypt"]["server_name"] }}
-public_baseurl: https://backend.{{ pillar["telecrypt"]["server_name"] }}/
+server_name: {{ vars["server"]["name"] }}
+public_baseurl: https://backend.{{ vars["server"]["name"] }}/

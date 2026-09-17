@@ -1,3 +1,4 @@
+{% set vars = pillar["telecrypt"] %}
 version: 1
 formatters:
   precise:
@@ -10,9 +11,9 @@ loggers:
   synapse.storage.SQL:
     level: INFO
   synapse.http.server:
-    level: {{ pillar["telecrypt"]["synapse_http_log_level"] }}
+    level: {{ vars["synapse"]["http_log_level"] }}
   synapse.http.client:
-    level: {{ pillar["telecrypt"]["synapse_http_client_log_level"] }}
+    level: {{ vars["synapse"]["http_client_log_level"] }}
   twisted:
     handlers:
       - console

@@ -1,9 +1,12 @@
-{% set t = pillar["telecrypt"] %}
-{% set data_dir = t["data_dir"] %}
+{% set vars = pillar["telecrypt"] %}
+{% set server = vars["server"] %}
+{% set operator = vars["operator"] %}
+{% set mas = vars["mas"] %}
+{% set data_dir = "/home/ubuntu/salt_config" %}
 {% set runtime_dir = data_dir ~ "/runtime" %}
 {% set secrets_dir = data_dir ~ "/secrets" %}
 {% set deploy_state_dir = data_dir ~ "/deploy-state" %}
-{% set mas_rust_log = t["mas_rust_log"] %}
+{% set mas_rust_log = mas["rust_log"] %}
 
 telecrypt-data-directory:
   file.directory:
@@ -45,8 +48,8 @@ telecrypt-deploy-state-directory:
 telecrypt-synapse-staging-directory:
   file.directory:
     - name: {{ runtime_dir }}/synapse-staging
-    - user: {{ t["subuid_start"]|int + 990 }}
-    - group: {{ t["subgid_start"]|int + 990 }}
+    - user: {{ operator["subuid_start"]|int + 990 }}
+    - group: {{ operator["subgid_start"]|int + 990 }}
     - mode: '0711'
     - makedirs: true
     - require:
@@ -55,8 +58,8 @@ telecrypt-synapse-staging-directory:
 telecrypt-synapse-staging-tmp-directory:
   file.directory:
     - name: {{ runtime_dir }}/synapse-staging/tmp
-    - user: {{ t["subuid_start"]|int + 990 }}
-    - group: {{ t["subgid_start"]|int + 990 }}
+    - user: {{ operator["subuid_start"]|int + 990 }}
+    - group: {{ operator["subgid_start"]|int + 990 }}
     - mode: '0700'
     - require:
       - file: telecrypt-synapse-staging-directory
@@ -65,11 +68,10 @@ telecrypt-deployment-environment:
   file.managed:
     - name: {{ data_dir }}/telecrypt-deployment.env
     - contents: |
-        TELECRYPT_DATA_DIR={{ t["data_dir"] }}
-        SERVER_NAME={{ t["server_name"] }}
-        BILLING_ENVIRONMENT={{ t["billing_environment"] }}
-        INGRESS_BIND_ADDRESS={{ t["ingress_bind_address"] }}
-        TRUSTED_PROXY={{ t["trusted_proxy"] }}
+        TELECRYPT_DATA_DIR={{ data_dir }}
+        SERVER_NAME={{ server["name"] }}
+        BILLING_ENVIRONMENT={{ server["billing_environment"] }}
+        INGRESS_BIND_ADDRESS={{ server["ingress_bind_address"] }}
     - user: ubuntu
     - group: ubuntu
     - mode: '0600'

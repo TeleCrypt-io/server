@@ -1,3 +1,4 @@
+{% set vars = pillar["telecrypt"] %}
 {#
   The runtime layer is deliberately loaded after mas.secrets.json. MAS's admerge behavior keeps
   private client records in the JSON overlay while this file owns rates, public identity, and the
@@ -6,20 +7,20 @@
 rate_limiting:
   login:
     per_ip:
-      burst: {{ pillar["telecrypt"]["mas_rate_limiting"]["login_per_ip_burst"] }}
-      per_second: {{ pillar["telecrypt"]["mas_rate_limiting"]["login_per_ip_per_second"] }}
+      burst: {{ vars["mas"]["login_per_ip_burst"] }}
+      per_second: {{ vars["mas"]["login_per_ip_per_second"] }}
     per_account:
-      burst: {{ pillar["telecrypt"]["mas_rate_limiting"]["login_per_account_burst"] }}
-      per_second: {{ pillar["telecrypt"]["mas_rate_limiting"]["login_per_account_per_second"] }}
+      burst: {{ vars["mas"]["login_per_account_burst"] }}
+      per_second: {{ vars["mas"]["login_per_account_per_second"] }}
   registration:
-    burst: {{ pillar["telecrypt"]["mas_rate_limiting"]["registration_burst"] }}
-    per_second: {{ pillar["telecrypt"]["mas_rate_limiting"]["registration_per_second"] }}
+    burst: {{ vars["mas"]["registration_burst"] }}
+    per_second: {{ vars["mas"]["registration_per_second"] }}
 
 http:
-  public_base: https://backend.{{ pillar["telecrypt"]["server_name"] }}/
+  public_base: https://backend.{{ vars["server"]["name"] }}/
 experimental:
-  plan_management_iframe_uri: https://backend.{{ pillar["telecrypt"]["server_name"] }}/plan/overview
+  plan_management_iframe_uri: https://backend.{{ vars["server"]["name"] }}/plan/overview
 policy:
   data:
     admin_clients:
-      - {{ pillar["telecrypt"]["admin_client_id"] }}
+      - {{ vars["mas"]["admin_client_id"] }}

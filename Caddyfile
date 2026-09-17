@@ -1,22 +1,11 @@
 # TeleCrypt.io plain-HTTP reverse proxy.
-# TLS is terminated by the upstream proxy; this listener is reachable only from
-# the configured trusted proxy and serves the shared Podman pod on port 8080.
+# TLS is terminated by the upstream proxy; this listener serves the shared
+# Podman pod on the VM's private port 8080.
 {
 	auto_https off
-	servers {
-		trusted_proxies static {$TRUSTED_PROXY}
-		trusted_proxies_strict
-	}
 }
 
 (common) {
-	@untrusted_ingress_peer {
-		not remote_ip {$TRUSTED_PROXY}
-	}
-	handle @untrusted_ingress_peer {
-		abort
-	}
-
 	log {
 		format filter {
 			request>uri regexp "[?].*" "?[REDACTED]"
@@ -88,11 +77,6 @@ http://backend.{$SERVER_NAME}:8080 {
 		path /login /logout /register /register/* /account /account/* /authorize /consent/* /link /device/* /recover /recover/* /upstream/* /complete-compat-sso/*
 		path /oauth2/* /graphql /assets/* /.well-known/openid-configuration /.well-known/webfinger /.well-known/change-password
 	}
-	@root path /
-
-	handle @root {
-		respond 418
-	}
 	handle @mas_compat {
 		reverse_proxy 127.0.0.1:8082
 	}
@@ -116,6 +100,6 @@ http://backend.{$SERVER_NAME}:8080 {
 		reverse_proxy 127.0.0.1:8082
 	}
 	handle {
-		respond "Not Found" 404
+		respond 418
 	}
 }

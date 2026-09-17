@@ -1,27 +1,25 @@
 telecrypt:
-  data_dir: /home/ubuntu/salt_config
-  server_name: stage.example.invalid
-  billing_environment: test
-  ingress_bind_address: 192.0.2.28
-  trusted_proxy: 192.0.2.1/32
-  operator_uid: 1000
-  operator_gid: 1000
-  subuid_start: 100000
-  subgid_start: 100000
-  subordinate_count: 65536
-  admin_client_id: REPLACE_WITH_HOST_VALUE
-  mas_rust_log: info,mas=debug,async_graphql=debug,reqwest=debug,hyper_util=debug
-  mas_rate_limiting:
+  server:
+    name: stage.example.invalid
+    billing_environment: test
+    ingress_bind_address: 192.0.2.28
+  operator:
+    subuid_start: 100000
+    subgid_start: 100000
+    subordinate_count: 65536
+  synapse:
+    message_per_second: 1000
+    message_burst: 1000
+    room_creation_per_second: 1000
+    room_creation_burst: 1000
+    http_log_level: DEBUG
+    http_client_log_level: DEBUG
+  mas:
+    admin_client_id: REPLACE_WITH_HOST_VALUE
+    rust_log: info,mas=debug,async_graphql=debug,reqwest=debug,hyper_util=debug
     login_per_ip_burst: 100000
     login_per_ip_per_second: 1000.0
     login_per_account_burst: 100000
     login_per_account_per_second: 1000.0
     registration_burst: 100000
     registration_per_second: 1000.0
-  synapse_rate_limiting:
-    message_per_second: 1000
-    message_burst: 1000
-    room_creation_per_second: 1000
-    room_creation_burst: 1000
-  synapse_http_log_level: DEBUG
-  synapse_http_client_log_level: DEBUG

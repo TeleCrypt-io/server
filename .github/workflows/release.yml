@@ -1,0 +1,171 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      synapse_tag:
+        description: Exact published Synapse server image tag
+        required: true
+        type: string
+      controlplane_tag:
+        description: Exact published Controlplane image tag
+        required: true
+        type: string
+      cashier_tag:
+        description: Exact published Cashier image tag
+        required: true
+        type: string
+
+concurrency:
+  group: server-state-assembly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: read
+    env:
+      CADDY_IMAGE: docker.io/caddy:2.11.4-alpine
+      SYNAPSE_IMAGE: ghcr.io/telecrypt-io/telecrypt-synapse:${{ inputs.synapse_tag }}
+      MAS_IMAGE: ghcr.io/element-hq/matrix-authentication-service:1.23.0
+      CONTROLPLANE_IMAGE: ghcr.io/telecrypt-io/controlplane:${{ inputs.controlplane_tag }}
+      CASHIER_IMAGE: ghcr.io/telecrypt-io/telecrypt-cashier:${{ inputs.cashier_tag }}
+      LK_JWT_IMAGE: ghcr.io/element-hq/lk-jwt-service:0.7.0
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate selected release tags
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.synapse_tag }}" =~ ^[0-9]+\.[0-9]+-tc[0-9]+$ ]]
+          [[ "${{ inputs.controlplane_tag }}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "${{ inputs.cashier_tag }}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+
+      - name: Validate Caddy configuration
+        run: |
+          set -euo pipefail
+          webhook_path="/payment_webhook_$(openssl rand -hex 32)"
+          podman run --rm --pull=always \
+            -e SERVER_NAME=stage.example.invalid \
+            -e DODO_WEBHOOK_PATH="$webhook_path" \
+            -v "$GITHUB_WORKSPACE:/work:ro" \
+            "$CADDY_IMAGE" caddy validate --config /work/Caddyfile --adapter caddyfile
+
+      - name: Parse Quadlet with the Stage Podman version
+        run: |
+          set -euo pipefail
+          test "$(podman --version)" = "podman version 4.9.3"
+          QUADLET_UNIT_DIRS="$GITHUB_WORKSPACE/systemd/quadlet" \
+            /usr/lib/systemd/user-generators/podman-user-generator --dryrun --no-kmsg-log \
+            > "$RUNNER_TEMP/server-state-generated-units"
+          test -s "$RUNNER_TEMP/server-state-generated-units"
+
+      - name: Render Salt states with the example pillar
+        run: |
+          set -euo pipefail
+          salt_version="$(<salt/version)"
+          test "$salt_version" = "3008.2"
+          sudo install -d -m 0755 /etc/apt/keyrings
+          curl -fsSL https://packages.broadcom.com/artifactory/api/security/keypair/SaltProjectKey/public \
+            | gpg --dearmor \
+            | sudo tee /etc/apt/keyrings/salt-archive-keyring.pgp >/dev/null
+          curl -fsSL https://github.com/saltstack/salt-install-guide/releases/latest/download/salt.sources \
+            | sudo tee /etc/apt/sources.list.d/salt.sources >/dev/null
+          printf 'Package: salt-*\nPin: version 3008.*\nPin-Priority: 1001\n' \
+            | sudo tee /etc/apt/preferences.d/salt-pin-1001 >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y "salt-minion=$salt_version" "salt-common=$salt_version"
+          pillar_dir="$RUNNER_TEMP/server-state-pillar"
+          install -d -m 0700 "$pillar_dir"
+          install -m 0600 salt/pillar/top.sls "$pillar_dir/top.sls"
+          install -m 0600 salt/pillar/telecrypt.sls.example "$pillar_dir/telecrypt.sls"
+          for state in salt.host salt.services; do
+            sudo salt-call --local --retcode-passthrough --out=raw \
+              --file-root="$GITHUB_WORKSPACE" --pillar-root="$pillar_dir" \
+              state.show_sls "$state" > "$RUNNER_TEMP/${state//./-}-render"
+            test -s "$RUNNER_TEMP/${state//./-}-render"
+          done
+
+      - name: Resolve image tags to immutable digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          command -v skopeo >/dev/null
+          authfile="$RUNNER_TEMP/server-state-podman-auth.json"
+          trap 'rm -f -- "$authfile"' EXIT
+          printf '%s' "$GH_TOKEN" | skopeo login --authfile "$authfile" \
+            --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+          for key in CADDY_IMAGE SYNAPSE_IMAGE MAS_IMAGE CONTROLPLANE_IMAGE CASHIER_IMAGE LK_JWT_IMAGE; do
+            digest="$(skopeo inspect --authfile "$authfile" --no-tags \
+              --format '{{.Digest}}' "docker://${!key}")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            printf '%s_DIGEST=%s\n' "$key" "$digest" >> "$GITHUB_ENV"
+          done
+
+      - name: Create the immutable Server State release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          release_tag="server-state-${GITHUB_SHA:0:8}-${GITHUB_RUN_ID}"
+          [[ "$release_tag" =~ ^server-state-[0-9a-f]{7,10}-[1-9][0-9]*$ ]]
+          if git ls-remote --exit-code origin "refs/tags/$release_tag" >/dev/null 2>&1; then
+            echo "immutable Server State tag already exists: $release_tag" >&2
+            exit 1
+          fi
+          annotated_tag_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
+            -f tag="$release_tag" \
+            -f message="Server State $release_tag" \
+            -f object="$GITHUB_SHA" \
+            -f type=commit --jq .sha)"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/$release_tag" -f sha="$annotated_tag_sha" >/dev/null
+
+          manifest_name="${release_tag}-images.json"
+          manifest_path="$RUNNER_TEMP/$manifest_name"
+          jq -n \
+            --arg tag "$release_tag" \
+            --arg commit "$GITHUB_SHA" \
+            --arg annotated "$annotated_tag_sha" \
+            --arg caddy "$CADDY_IMAGE" --arg caddy_digest "$CADDY_IMAGE_DIGEST" \
+            --arg synapse "$SYNAPSE_IMAGE" --arg synapse_digest "$SYNAPSE_IMAGE_DIGEST" \
+            --arg mas "$MAS_IMAGE" --arg mas_digest "$MAS_IMAGE_DIGEST" \
+            --arg controlplane "$CONTROLPLANE_IMAGE" --arg controlplane_digest "$CONTROLPLANE_IMAGE_DIGEST" \
+            --arg cashier "$CASHIER_IMAGE" --arg cashier_digest "$CASHIER_IMAGE_DIGEST" \
+            --arg lk_jwt "$LK_JWT_IMAGE" --arg lk_jwt_digest "$LK_JWT_IMAGE_DIGEST" \
+            '{schema_version: 1, server_state_tag: $tag, source_commit: $commit,
+              annotated_tag_sha: $annotated,
+              images: {
+                CADDY_IMAGE: {image: $caddy, digest: $caddy_digest},
+                SYNAPSE_IMAGE: {image: $synapse, digest: $synapse_digest},
+                MAS_IMAGE: {image: $mas, digest: $mas_digest},
+                CONTROLPLANE_IMAGE: {image: $controlplane, digest: $controlplane_digest},
+                CASHIER_IMAGE: {image: $cashier, digest: $cashier_digest},
+                LK_JWT_IMAGE: {image: $lk_jwt, digest: $lk_jwt_digest}
+              }}' > "$manifest_path"
+          jq -e '.images | length == 6 and all(.[]; (.image | type == "string") and (.digest | test("^sha256:[0-9a-f]{64}$")))' "$manifest_path" >/dev/null
+          gh release create "$release_tag" "$manifest_path" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$release_tag" \
+            --notes "Server State image digest manifest for commit $GITHUB_SHA." \
+            --target "$GITHUB_SHA" \
+            --verify-tag
+
+          download_dir="$RUNNER_TEMP/server-state-readback"
+          mkdir -p "$download_dir"
+          gh release download "$release_tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$manifest_name" --dir "$download_dir"
+          cmp "$manifest_path" "$download_dir/$manifest_name"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$release_tag" --jq '.object.type' | grep -qx tag

@@ -1,4 +1,4 @@
-{% set uid = pillar["telecrypt"]["operator_uid"]|int %}
+{% set uid = salt["user.info"]("ubuntu").get("uid", 1000)|int %}
 {% set unit_dir = "/home/ubuntu/.config/systemd/user" %}
 {% set env = {
   "HOME": "/home/ubuntu",

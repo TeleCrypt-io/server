@@ -19,7 +19,6 @@ ReadOnly=true
 DropCapability=ALL
 AddCapability=NET_BIND_SERVICE
 Environment=SERVER_NAME=${SERVER_NAME}
-Environment=TRUSTED_PROXY=${TRUSTED_PROXY}
 Volume=/home/ubuntu/salt_config/current/Caddyfile:/etc/caddy/Caddyfile:ro
 Tmpfs=/config/caddy:rw,mode=1777
 Tmpfs=/data/caddy:rw,mode=1777

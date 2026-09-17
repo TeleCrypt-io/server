@@ -68,13 +68,11 @@ user_types:
   extra_user_types:
     - verified
 
-# Fail-closed capability restrictions for unverified users (uploads, room cap, encryption).
+# Fail-closed capability restrictions for unverified users (uploads and encryption).
 # Baked into the exact TeleCrypt Synapse image selected by the server release, which contains
 # the Controlplane policy-module wheel. Its source and tests live in the control-plane source tree.
 modules:
   - module: tier_controller.TierController
-    config:
-      restricted_room_cap: 3
 
 # Modern client features and MatrixRTC settings are supplied by the final runtime layer. Keeping the
 # complete mapping there avoids shallow-merge loss when the deployment adds MSC4143 for LiveKit.

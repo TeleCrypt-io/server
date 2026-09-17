@@ -1,4 +1,4 @@
-{% set data_dir = pillar["telecrypt"]["data_dir"] %}
+{% set data_dir = "/home/ubuntu/salt_config" %}
 {% set unit_dir = "/home/ubuntu/.config/systemd/user" %}
 {% set quadlet_dir = "/home/ubuntu/.config/containers/systemd" %}
 
