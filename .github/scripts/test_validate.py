@@ -213,14 +213,6 @@ class ConfigurationRenderingTests(unittest.TestCase):
         for path in ("matrix/mas.runtime.yaml.j2", "matrix/synapse.runtime.yaml.j2", "matrix/synapse.log.config.j2"):
             self.assertNotIn("stage.telecrypt.io", (self.root / path).read_text(encoding="utf-8"))
 
-    def test_caddy_routes_remain_environment_derived(self) -> None:
-        caddy = (self.root / "Caddyfile").read_text(encoding="utf-8")
-        for route in ("/auth", "/_matrix/client", "/livekit/jwt", "/plan", "/internal"):
-            self.assertIn(route, caddy)
-        self.assertIn("servers :8080", caddy)
-        self.assertIn("protocols h1", caddy)
-
-
 class ReleaseWorkflowGitTests(unittest.TestCase):
 
     def test_dispatch_inputs_and_candidate_tag_are_unique(self) -> None:

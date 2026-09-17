@@ -1,23 +1,6 @@
-# TeleCrypt.io — Caddy as a PLAIN-HTTP reverse proxy.
-#
-# TLS is terminated by an upstream reverse proxy, which forwards cleartext HTTP here. The `http://`
-# site prefixes disable Caddy's automatic HTTPS so it serves on the HTTP port only.
-#
-# Requirements:
-#   - Caddy and the application services share the rootless Podman pod network namespace; internal
-#     HTTP upstreams use their assigned 127.0.0.1 ports.
-#   - It listens on unprivileged pod port 8080; host ingress publishes this Caddy port.
-#   - The upstream proxy MUST send `X-Forwarded-Proto: https` (so MAS/Synapse build https URLs and
-#     set Secure cookies).
-#   - `TRUSTED_PROXY` must be exactly one TLS-terminator host address (/32 or /128). Caddy uses it
-#     to trust only that proxy's forwarded protocol and client context; application identity and
-#     rate limiting do not depend on a forwarded client-IP header.
-#   - The pasta host-publish path must preserve the TLS terminator's transport address for Caddy's
-#     immediate-peer check; forwarded headers do not determine that peer.
-
-# TLS / auto-HTTPS is FULLY disabled: HAProxy terminates TLS and forwards plain HTTP here.
-# `auto_https off` stops Caddy from provisioning ANY certificate, opening :443, or doing ACME —
-# it serves the HTTP port only and never exposes a domain via auto-SSL.
+# TeleCrypt.io plain-HTTP reverse proxy.
+# TLS is terminated by the upstream proxy; this listener is reachable only from
+# the configured trusted proxy and serves the shared Podman pod on port 8080.
 
 {
 	auto_https off
@@ -25,26 +8,26 @@
 		trusted_proxies static {$TRUSTED_PROXY}
 		trusted_proxies_strict
 	}
-
 	servers :8080 {
 		protocols h1
 	}
 }
 
-# Safe response defaults. MAS embeds the Plan page from the same backend origin; Plan's own
-# same-origin framing policy remains authoritative. Do not add a wildcard or third-party frame
-# permission here. TLS/HSTS policy belongs to the TLS-terminating host, not this HTTP-only proxy.
-(security_headers) {
+(common) {
+	@untrusted_ingress_peer {
+		not remote_ip {$TRUSTED_PROXY}
+	}
+	handle @untrusted_ingress_peer {
+		abort
+	}
+
 	header {
 		-Server
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(self), geolocation=(), microphone=(self)"
 	}
-}
 
-# Keep query strings and credential headers out of the access log in every environment.
-(access_log) {
 	log {
 		format filter {
 			request>uri regexp "[?].*" "?[REDACTED]"
@@ -56,38 +39,14 @@
 	}
 }
 
-# No upstream may trust a client-selected identity header. Remove the obsolete client-IP header
-# from every forwarded request; no current service consumes it for identity or rate limiting.
-(strip_untrusted_client_ip) {
-	header_up -X-Telecrypt-Client-IP
-}
-
-# Caddy must be reachable only from the configured TLS terminator. `remote_ip` is the immediate
-# transport peer and is deliberately independent of forwarded-client-IP trust. The pasta host-publish
-# path must preserve that peer address.
-(ingress_peer_gate) {
-	@untrusted_ingress_peer {
-		not remote_ip {$TRUSTED_PROXY}
-	}
-	handle @untrusted_ingress_peer {
-		abort
-	}
-}
-
-# ── APEX (SERVER_NAME): well-known discovery + production-only landing redirect ─────────────────
-# The apex serves the Matrix server_name domain. .well-known/matrix/client is served here with
-# proper CORS/Content-Type headers (GitHub Pages at www can't set those). Only the production
-# profile redirects ordinary requests to the landing site; stage has no public website and returns
-# a bounded 404 instead of redirecting into production.
 http://{$SERVER_NAME}:8080 {
-	import ingress_peer_gate
-	import access_log
-	import security_headers
+	import common
 
-	# .well-known Matrix client discovery (CORS-open, cacheable).
-	header /.well-known/matrix/* Content-Type "application/json"
-	header /.well-known/matrix/* Access-Control-Allow-Origin "*"
-	header /.well-known/matrix/* Cache-Control "max-age=3600"
+	header /.well-known/matrix/* {
+		Content-Type "application/json"
+		Access-Control-Allow-Origin "*"
+		Cache-Control "max-age=3600"
+	}
 
 	@well_known_client {
 		method GET
@@ -95,217 +54,74 @@ http://{$SERVER_NAME}:8080 {
 	}
 	handle @well_known_client {
 		respond `{
-				"m.homeserver": {"base_url": "https://backend.{$SERVER_NAME}"},
+				"m.homeserver": {
+					"base_url": "https://backend.{$SERVER_NAME}"
+				},
 				"org.matrix.msc2965.authentication": {
-					"issuer": "https://backend.{$SERVER_NAME}/auth/",
-					"account": "https://backend.{$SERVER_NAME}/auth/account"
+					"issuer": "https://backend.{$SERVER_NAME}/",
+					"account": "https://backend.{$SERVER_NAME}/account/"
 				},
 				"org.matrix.msc4143.rtc_foci": [{
 					"type": "livekit",
-					"livekit_service_url": "https://backend.{$SERVER_NAME}/livekit/jwt"
+					"livekit_service_url": "https://backend.{$SERVER_NAME}"
 				}]
 			}`
 	}
 
-	# The JWT service follows this discovery when it verifies a Matrix OpenID token. This is the
-	# only server-server URL exposed by Caddy; all other federation paths remain blocked below.
-	handle /.well-known/matrix/server {
+	@well_known_server {
+		method GET
+		path /.well-known/matrix/server
+	}
+	handle @well_known_server {
 		respond `{"m.server":"backend.{$SERVER_NAME}:443"}`
 	}
 
-# The public website is served by the separate Pages deployment. Redirect only its apex here.
 	@production_apex host telecrypt.io
 	handle @production_apex {
-		# Drop the query string so callback codes or other secrets cannot be carried to the landing site.
 		redir https://www.telecrypt.io{http.request.uri.path} 301
 	}
+
 	handle {
 		respond "Not Found" 404
 	}
 }
 
-# ── BACKEND (derived from SERVER_NAME): Synapse + MAS + Registration + Plan + Cashier ──────────
 http://backend.{$SERVER_NAME}:8080 {
-	import ingress_peer_gate
-	import access_log
-	import security_headers
+	import common
 
-	# MAS administrative APIs are not part of the public Caddy surface.
-	@mas_admin path /auth/api/admin /auth/api/admin/*
-	handle @mas_admin {
-		respond "Not Found" 404
-	}
-	@synapse_admin path /_synapse /_synapse/*
-	handle @synapse_admin {
-		respond "Not Found" 404
-	}
-	# Cashier's command API is for internal application calls, not the public Caddy surface.
-	@cashier_internal path /internal /internal/*
-	handle @cashier_internal {
-		respond "Not Found" 404
-	}
+	@password_login path_regexp ^/_matrix/client/[^/]+/login/?$
+	@mas_compat path_regexp ^/_matrix/client/[^/]+/(logout|refresh)/?$
+	@synapse path /_matrix/*
+	@redpill path /redpill
+	@plan path /plan /plan/*
+	@cashier path {$DODO_WEBHOOK_PATH}
+	@lk_jwt path /sfu/get /get_token /delegate_delayed_leave /sfu_webhook /healthz
 
-	# Matrix password login must never reach MAS or Synapse.
-	# MAS-hosted /auth/login remains available for OAuth browser/device approval.
-	@matrix_compat_login path_regexp ^/_matrix/client/[^/]+/login/?$
-	handle @matrix_compat_login {
+	handle @password_login {
 		respond "Not Found" 404
-	}
-
-	# Retain only POST MAS logout/refresh routes required by Matrix clients. Reject every other
-	# method before the generic Synapse matcher below can see the path.
-	@mas_compat_other_method {
-		path_regexp ^/_matrix/client/[^/]+/(logout|refresh)/?$
-		not method POST
-	}
-	handle @mas_compat_other_method {
-		header Allow "POST"
-		respond "Method Not Allowed" 405
-	}
-	@mas_compat {
-		method POST
-		path_regexp ^/_matrix/client/[^/]+/(logout|refresh)/?$
 	}
 	handle @mas_compat {
-		reverse_proxy 127.0.0.1:8082 {
-			import strip_untrusted_client_ip
-		}
+		reverse_proxy 127.0.0.1:8082
 	}
-
-	# Keep the edge admission limit equal to Synapse's exact 128 MiB plaintext limit.
-	# The request body is bounded before it reaches the application or staging disk.
-	@media_upload {
-		method POST PUT
-		path_regexp ^/_matrix/media/(r0|v1|v3)/upload(/[^/]+/[^/]+)?/?$
-	}
-	handle @media_upload {
-		request_body {
-			max_size 128MiB
-		}
-		reverse_proxy 127.0.0.1:8008 {
-			import strip_untrusted_client_ip
-		}
-	}
-
-	# … and everything under /auth (its UI, OAuth2, discovery, account).
-	# Strip the /auth prefix before forwarding — MAS serves everything at its root internally.
-	@mas path /auth /auth/*
-	handle @mas {
-		uri strip_prefix /auth
-		reverse_proxy 127.0.0.1:8082 {
-			import strip_untrusted_client_ip
-		}
-	}
-
-	# Media deletion is an authenticated Synapse operation, but only POST is part of its contract.
-	# Answer the browser preflight at the edge with only the headers required by the Storage Web
-	# POST. The origin is the exact current environment's Storage host; no arbitrary-origin
-	# reflection or wildcard CORS is allowed.
-	@telecrypt_delete_media_options {
-		method OPTIONS
-		path /_matrix/client/unstable/io.telecrypt.storage/delete_media
-		header Origin https://storage.{$SERVER_NAME}
-		header Access-Control-Request-Method POST
-	}
-	handle @telecrypt_delete_media_options {
-		header {
-			Access-Control-Allow-Origin "https://storage.{$SERVER_NAME}"
-			Access-Control-Allow-Methods "POST"
-			Access-Control-Allow-Headers "Authorization, Content-Type"
-		}
-		respond "" 204
-	}
-
-	# Reject other methods at the edge and proxy authenticated deletion requests to Synapse.
-	@telecrypt_delete_media_other_method {
-		path /_matrix/client/unstable/io.telecrypt.storage/delete_media
-		not method POST
-	}
-	handle @telecrypt_delete_media_other_method {
-		header Allow "POST, OPTIONS"
-		respond "Method Not Allowed" 405
-	}
-	@telecrypt_delete_media {
-		method POST
-		path /_matrix/client/unstable/io.telecrypt.storage/delete_media
-	}
-	handle @telecrypt_delete_media {
-		reverse_proxy 127.0.0.1:8008 {
-			import strip_untrusted_client_ip
-		}
-	}
-
-	# Enabled Matrix client and media resources → Synapse. /_synapse and other Matrix resources are
-	# deliberately excluded: see the admin block above and the listener resources in synapse.yaml.
-	@synapse path_regexp ^/_matrix/(client|media)(/|$)
 	handle @synapse {
-		reverse_proxy 127.0.0.1:8008 {
-			import strip_untrusted_client_ip
-		}
+		reverse_proxy 127.0.0.1:8008
 	}
-
-	# Agent on-ramp accepts POST only. Return 405 at the edge rather than proxying other methods.
-	@registration_post {
-		method POST
-		path /redpill
+	handle @redpill {
+		reverse_proxy 127.0.0.1:9009
 	}
-	handle @registration_post {
-		reverse_proxy 127.0.0.1:9009 {
-			import strip_untrusted_client_ip
-		}
-	}
-	@registration_other_method {
-		path /redpill
-		not method POST
-	}
-
-	# LiveKit's standalone JWT service is reachable only through the backend prefix. Strip that
-	# public prefix so the service receives its documented /get_token, /sfu/get and webhook paths.
-	handle_path /livekit/jwt/* {
-		reverse_proxy 127.0.0.1:9013 {
-			import strip_untrusted_client_ip
-		}
-	}
-	handle @registration_other_method {
-		header Allow "POST"
-		respond "Method Not Allowed" 405
-	}
-
-	# Plan owns every browser route. Canonical Plan actions use /api/plan. Dodo card data is entered only
-	# on the provider-hosted checkout.
-	@plan path /plan /plan/* /api/plan /api/plan/*
 	handle @plan {
-		reverse_proxy 127.0.0.1:9012 {
-			import strip_untrusted_client_ip
-		}
+		reverse_proxy 127.0.0.1:9012
 	}
-	# Cashier has no browser surface. The provider's persistent randomized signed webhook endpoint is
-	# the only public Cashier route. Access-log detail follows the selected environment profile.
-	@dodo_webhook {
-		method POST
-		path {$DODO_WEBHOOK_PATH}
-	}
-
-	# Synapse exposes only the native OpenID servlet needed by lk-jwt-service token verification.
-	# Federation, keys, transactions and room routes remain absent from the public matcher set.
-	@matrix_openid {
-		method GET
-		path /_matrix/federation/v1/openid/userinfo
-	}
-	handle @matrix_openid {
-		reverse_proxy 127.0.0.1:8008 {
-			import strip_untrusted_client_ip
-		}
-	}
-	handle @dodo_webhook {
+	handle @cashier {
 		header Cache-Control "no-store"
-		reverse_proxy 127.0.0.1:9011 {
-			import strip_untrusted_client_ip
-		}
+		reverse_proxy 127.0.0.1:9011
+	}
+	handle @lk_jwt {
+		reverse_proxy 127.0.0.1:9013
 	}
 
-	# Everything else is outside the published application surface.
+	# MAS owns its native root, OAuth, account, discovery and compatibility routes.
 	handle {
-		respond "Not Found" 404
+		reverse_proxy 127.0.0.1:8082
 	}
 }
