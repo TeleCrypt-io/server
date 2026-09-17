@@ -78,7 +78,6 @@ http://{$SERVER_NAME}:8080 {
 http://backend.{$SERVER_NAME}:8080 {
 	import common
 
-	@password_login path_regexp ^/_matrix/client/[^/]+/login/?$
 	@mas_compat path_regexp ^/_matrix/client/[^/]+/(logout|refresh)/?$
 	@synapse path /_matrix/*
 	@redpill path /redpill
@@ -93,9 +92,6 @@ http://backend.{$SERVER_NAME}:8080 {
 
 	handle @root {
 		respond 418
-	}
-	handle @password_login {
-		respond "Not Found" 404
 	}
 	handle @mas_compat {
 		reverse_proxy 127.0.0.1:8082
