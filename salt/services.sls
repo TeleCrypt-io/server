@@ -54,7 +54,7 @@ telecrypt-target-enabled:
     - env: {{ env }}
     - unless: >-
         test "$(readlink -f {{ unit_dir }}/default.target.wants/telecrypt.target)" =
-        "{{ unit_dir }}/telecrypt.target" &&
+        "$(readlink -f {{ unit_dir }}/telecrypt.target)" &&
         systemctl --user is-enabled telecrypt.target >/dev/null 2>&1
     - require:
       - cmd: telecrypt-user-daemon-reload
@@ -66,7 +66,7 @@ telecrypt-janitor-timer-enabled:
     - env: {{ env }}
     - unless: >-
         test "$(readlink -f {{ unit_dir }}/timers.target.wants/telecrypt-janitor.timer)" =
-        "{{ unit_dir }}/telecrypt-janitor.timer" &&
+        "$(readlink -f {{ unit_dir }}/telecrypt-janitor.timer)" &&
         systemctl --user is-enabled telecrypt-janitor.timer >/dev/null 2>&1
     - require:
       - cmd: telecrypt-user-daemon-reload
