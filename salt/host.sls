@@ -19,6 +19,41 @@ telecrypt-runtime-packages:
       - podman
       - uidmap
 
+telecrypt-cloud-init-hostname:
+  file.managed:
+    - name: /etc/cloud/cloud.cfg.d/99-telecrypt-hostname.cfg
+    - contents: |
+        preserve_hostname: true
+    - user: root
+    - group: root
+    - mode: '0644'
+
+telecrypt-container-network-module:
+  file.managed:
+    - name: /etc/modules-load.d/telecrypt-container-network.conf
+    - contents: |
+        br_netfilter
+    - user: root
+    - group: root
+    - mode: '0644'
+
+telecrypt-user-manager-delegation:
+  file.managed:
+    - name: /etc/systemd/system/user@.service.d/delegate.conf
+    - contents: |
+        [Service]
+        Delegate=cpu cpuset io memory pids
+    - user: root
+    - group: root
+    - mode: '0644'
+    - makedirs: true
+
+telecrypt-system-daemon-reload:
+  cmd.run:
+    - name: systemctl daemon-reload
+    - onchanges:
+      - file: telecrypt-user-manager-delegation
+
 telecrypt-subuid:
   file.replace:
     - name: /etc/subuid
