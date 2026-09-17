@@ -245,17 +245,17 @@ http://backend.{$SERVER_NAME}:8080 {
 	}
 
 	# Agent on-ramp accepts POST only. Return 405 at the edge rather than proxying other methods.
-	@agents_post {
+	@registration_post {
 		method POST
-		path /agents
+		path /redpill
 	}
-	handle @agents_post {
+	handle @registration_post {
 		reverse_proxy 127.0.0.1:9009 {
 			import strip_untrusted_client_ip
 		}
 	}
-	@agents_other_method {
-		path /agents
+	@registration_other_method {
+		path /redpill
 		not method POST
 	}
 
@@ -266,7 +266,7 @@ http://backend.{$SERVER_NAME}:8080 {
 			import strip_untrusted_client_ip
 		}
 	}
-	handle @agents_other_method {
+	handle @registration_other_method {
 		header Allow "POST"
 		respond "Method Not Allowed" 405
 	}
