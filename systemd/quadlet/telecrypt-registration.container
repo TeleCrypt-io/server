@@ -10,11 +10,18 @@ ContainerName=telecrypt-registration
 Image=${CONTROLPLANE_IMAGE}
 PodmanArgs=--pod=telecrypt
 PodmanArgs=--security-opt=no-new-privileges
+PodmanArgs=--sdnotify=healthy
 Pull=never
 User=991:991
 ReadOnly=true
 DropCapability=ALL
 Environment=SERVER_NAME=${SERVER_NAME}
+
+HealthCmd=["/registration","healthcheck"]
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=30s
 
 [Service]
 EnvironmentFile=/home/ubuntu/salt_config/telecrypt-deployment.env

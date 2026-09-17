@@ -11,6 +11,7 @@ Image=${CONTROLPLANE_IMAGE}
 PodmanArgs=--pod=telecrypt
 PodmanArgs=--security-opt=no-new-privileges
 PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/plan.secrets.env
+PodmanArgs=--sdnotify=healthy
 Pull=never
 User=991:991
 ReadOnly=true
@@ -18,6 +19,12 @@ DropCapability=ALL
 Environment=SERVER_NAME=${SERVER_NAME}
 Environment=BILLING_ENVIRONMENT=${BILLING_ENVIRONMENT}
 Exec=/plan
+
+HealthCmd=["/plan","healthcheck"]
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=30s
 
 [Service]
 EnvironmentFile=/home/ubuntu/salt_config/telecrypt-deployment.env

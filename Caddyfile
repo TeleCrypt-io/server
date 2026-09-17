@@ -88,7 +88,7 @@ http://backend.{$SERVER_NAME}:8080 {
 	@redpill path /redpill
 	@plan path /plan/*
 	@cashier path {$DODO_WEBHOOK_PATH}
-	@lk_jwt path /sfu/get /get_token /delegate_delayed_leave /sfu_webhook /healthz
+	@lk_jwt path /sfu/get /get_token /delegate_delayed_leave /sfu_webhook
 	@mas {
 		path /login /logout /register /register/* /account /account/* /authorize /consent/* /link /device/* /recover /recover/* /upstream/* /complete-compat-sso/*
 		path /oauth2/* /graphql /assets/* /.well-known/openid-configuration /.well-known/webfinger /.well-known/change-password
