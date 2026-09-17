@@ -84,6 +84,7 @@ http://backend.{$SERVER_NAME}:8080 {
 
 	@password_login path_regexp ^/_matrix/client/[^/]+/login/?$
 	@mas_compat path_regexp ^/_matrix/client/[^/]+/(logout|refresh)/?$
+	@media_upload path /_matrix/media/v3/upload
 	@synapse path /_matrix/*
 	@redpill path /redpill
 	@plan path /plan/*
@@ -99,6 +100,12 @@ http://backend.{$SERVER_NAME}:8080 {
 	}
 	handle @mas_compat {
 		reverse_proxy 127.0.0.1:8082
+	}
+	handle @media_upload {
+		request_body {
+			max_size 134217728
+		}
+		reverse_proxy 127.0.0.1:8008
 	}
 	handle @synapse {
 		reverse_proxy 127.0.0.1:8008
