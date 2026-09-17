@@ -1,0 +1,15 @@
+# Install as a small include on the Harness Salt master.
+# Replace MASTER_INTERNAL_IP with this machine's internal address.
+interface: MASTER_INTERNAL_IP
+publish_port: 4505
+ret_port: 4506
+file_client: remote
+file_roots:
+  base:
+    - /home/ubuntu/servers_salt_configs/releases/current
+pillar_roots:
+  base:
+    - /home/ubuntu/servers_salt_configs/pillar
+# Keep key acceptance explicit. The operator accepts a new VM key with
+# `sudo salt-key -a <minion-id>` after checking the VM identity.
+auto_accept: false

@@ -3,6 +3,12 @@ telecrypt:
     name: stage.example.invalid
     billing_environment: test
     ingress_bind_address: 192.0.2.28
+  salt:
+    master: 192.0.2.20
+    master_finger: REPLACE_WITH_SALT_MASTER_FINGERPRINT
+    minion_id: stage
+  release:
+    tag: server-state-REPLACE_WITH_RELEASE_TAG
   operator:
     subuid_start: 100000
     subgid_start: 100000
