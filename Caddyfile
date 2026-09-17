@@ -21,13 +21,6 @@
 		abort
 	}
 
-	header {
-		-Server
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		Permissions-Policy "camera=(self), geolocation=(), microphone=(self)"
-	}
-
 	log {
 		format filter {
 			request>uri regexp "[?].*" "?[REDACTED]"
@@ -96,6 +89,10 @@ http://backend.{$SERVER_NAME}:8080 {
 	@plan path /plan /plan/*
 	@cashier path {$DODO_WEBHOOK_PATH}
 	@lk_jwt path /sfu/get /get_token /delegate_delayed_leave /sfu_webhook /healthz
+	@mas {
+		path / /login /logout /register /register/* /account /account/* /authorize /consent/* /link /device/* /recover /recover/* /upstream/* /complete-compat-sso/*
+		path /oauth2/* /graphql /assets/* /.well-known/openid-configuration /.well-known/webfinger /.well-known/change-password
+	}
 
 	handle @password_login {
 		respond "Not Found" 404
@@ -120,8 +117,10 @@ http://backend.{$SERVER_NAME}:8080 {
 		reverse_proxy 127.0.0.1:9013
 	}
 
-	# MAS owns its native root, OAuth, account, discovery and compatibility routes.
-	handle {
+	handle @mas {
 		reverse_proxy 127.0.0.1:8082
+	}
+	handle {
+		respond "Not Found" 404
 	}
 }
