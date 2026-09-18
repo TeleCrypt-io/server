@@ -140,11 +140,10 @@ telecrypt-mas-environment:
 telecrypt-secret-metadata-{{ name|replace(".", "-")|replace("_", "-") }}:
   file.managed:
     - name: {{ secrets_dir }}/{{ name }}
+    - contents_pillar: telecrypt:secrets:{{ name }}
     - user: ubuntu
     - group: ubuntu
     - mode: '{{ mode }}'
-    - replace: false
-    - create: false
     - show_changes: false
     - require:
       - file: telecrypt-secrets-directory
