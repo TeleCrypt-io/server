@@ -34,7 +34,7 @@ jobs:
     env:
       CADDY_IMAGE: docker.io/caddy:2.11.4-alpine
       SYNAPSE_IMAGE: ghcr.io/telecrypt-io/telecrypt-synapse:${{ inputs.synapse_tag }}
-      MAS_IMAGE: ghcr.io/element-hq/matrix-authentication-service:1.23.0
+      MAS_IMAGE: ghcr.io/element-hq/matrix-authentication-service:1.24.0
       CONTROLPLANE_IMAGE: ghcr.io/telecrypt-io/controlplane:${{ inputs.controlplane_tag }}
       CASHIER_IMAGE: ghcr.io/telecrypt-io/telecrypt-cashier:${{ inputs.cashier_tag }}
       LK_JWT_IMAGE: ghcr.io/element-hq/lk-jwt-service:0.7.0
@@ -94,7 +94,7 @@ jobs:
           jq -n '{schema_version: 1, server_state_tag: "server-state-REPLACE_WITH_RELEASE_TAG", source_commit: "0000000000000000000000000000000000000000", annotated_tag_sha: "0000000000000000000000000000000000000000000000000000000000000000", images: {
             CADDY_IMAGE: {image: "docker.io/caddy:2.11.4-alpine", digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
             SYNAPSE_IMAGE: {image: "ghcr.io/telecrypt-io/telecrypt-synapse:0.0.0-tc0", digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
-            MAS_IMAGE: {image: "ghcr.io/element-hq/matrix-authentication-service:1.23.0", digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+            MAS_IMAGE: {image: "ghcr.io/element-hq/matrix-authentication-service:1.24.0", digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
             CONTROLPLANE_IMAGE: {image: "ghcr.io/telecrypt-io/controlplane:0.0.0", digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
             CASHIER_IMAGE: {image: "ghcr.io/telecrypt-io/telecrypt-cashier:0.0.0", digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
             LK_JWT_IMAGE: {image: "ghcr.io/element-hq/lk-jwt-service:0.7.0", digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
