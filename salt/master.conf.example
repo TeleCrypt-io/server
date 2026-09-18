@@ -12,7 +12,7 @@ pillar_roots:
     - /home/ubuntu/servers_salt_configs/pillar
 ext_pillar:
   - file_tree:
-      root_dir: /home/ubuntu/servers_salt_configs/pillar/files
+      root_dir: /home/ubuntu/servers_salt_configs/pillar
       follow_dir_links: false
       keep_newline: true
 # Keep key acceptance explicit. The operator accepts a new VM key with
