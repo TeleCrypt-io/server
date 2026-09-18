@@ -154,7 +154,8 @@ telecrypt-sshd-effective-validation:
       - file: telecrypt-sshd-drop-in
 
 telecrypt-sshd-reload:
-  cmd.run:
-    - name: systemctl reload ssh.service
-    - onchanges:
+  service.running:
+    - name: ssh.service
+    - reload: true
+    - watch:
       - cmd: telecrypt-sshd-effective-validation
