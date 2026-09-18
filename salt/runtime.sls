@@ -137,10 +137,10 @@ telecrypt-mas-environment:
   ("synapse_signing.key", "0444"),
   ("mas.secrets.json", "0444")
 ) %}
-telecrypt-secret-metadata-{{ name|replace(".", "-")|replace("_", "-") }}:
+telecrypt-secret-{{ name|replace(".", "-")|replace("_", "-") }}:
   file.managed:
     - name: {{ secrets_dir }}/{{ name }}
-    - contents_pillar: telecrypt:secrets:{{ name }}
+    - contents_pillar: secrets:{{ name }}
     - user: ubuntu
     - group: ubuntu
     - mode: '{{ mode }}'

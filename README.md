@@ -36,7 +36,7 @@ master address and fingerprint, and starts the minion. The VM image is expected 
 owner's recovery SSH key; Salt does not replace `authorized_keys`.
 
 Store each target's exact secret files under
-`~/servers_salt_configs/pillar/files/hosts/<minion-id>/telecrypt/secrets/`. The master's built-in
+`~/servers_salt_configs/pillar/hosts/<minion-id>/secrets/`. The master's built-in
 `file_tree` Pillar exposes only the matching target's files as Pillar values, and `salt.host`
 writes them to `/home/ubuntu/salt_config/secrets/` with their required private modes. This private
 tree is the authoritative copy and must never be added to this repository.
