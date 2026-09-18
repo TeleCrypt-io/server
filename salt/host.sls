@@ -118,6 +118,14 @@ telecrypt-salt-minion:
     - require:
       - pkg: telecrypt-runtime-packages
 
+telecrypt-sshd-runtime-directory:
+  file.directory:
+    - name: /run/sshd
+    - user: root
+    - group: root
+    - mode: '0755'
+    - makedirs: true
+
 telecrypt-sshd-drop-in:
   file.managed:
     - name: /etc/ssh/sshd_config.d/90-telecrypt-hardening.conf
@@ -137,6 +145,7 @@ telecrypt-sshd-drop-in:
     - show_changes: false
     - require:
       - pkg: telecrypt-runtime-packages
+      - file: telecrypt-sshd-runtime-directory
 
 telecrypt-sshd-effective-validation:
   cmd.run:
