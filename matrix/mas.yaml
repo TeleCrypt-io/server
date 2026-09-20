@@ -73,7 +73,7 @@ account:
 email:
   transport: blackhole
 
-# Keep policy behavior in the committed base. The environment-bound Plan/Janitor admin client is added
+# Keep policy behavior in the committed base. The environment-bound Janitor admin client is added
 # by the final runtime layer, not by the private secret overlay.
 policy:
   wasm_module: /usr/local/share/mas-cli/policy.wasm

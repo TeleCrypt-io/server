@@ -62,13 +62,16 @@ password_config:
 
 report_stats: false
 
-# Custom user type for the inverted tier model (verified vs. everything else).
-# Enforcement is done by the tier_controller module; Synapse just needs to accept this value.
+# Custom user types used by the local policy projection. A missing value remains the initial
+# Free/unclaimed state; the module treats it as restricted and never invents a paid state.
 user_types:
   extra_user_types:
+    - wild
     - verified
+    - uploads_blocked
 
-# Fail-closed capability restrictions for unverified users (uploads and encryption).
+# Fail-closed capability restrictions for unverified users (uploads and plaintext events).
+# Free users may still create encrypted rooms until their account is suspended.
 # Baked into the exact TeleCrypt Synapse image selected by the server release, which contains
 # the Controlplane policy-module wheel. Its source and tests live in the control-plane source tree.
 modules:

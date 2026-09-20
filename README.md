@@ -38,7 +38,10 @@ owner's recovery SSH key; Salt does not replace `authorized_keys`.
 Store each target's exact secret files under
 `~/servers_salt_configs/pillar/hosts/<minion-id>/secrets/`. The master's built-in
 `file_tree` Pillar exposes only the matching target's files as Pillar values, and `salt.host`
-writes them to `/home/ubuntu/salt_config/secrets/` with their required private modes. This private
-tree is the authoritative copy and must never be added to this repository.
+writes them to `/home/ubuntu/salt_config/secrets/` with their required private modes. Cashier
+keeps only its database, Synapse projection token, webhook secret and Plan request verifier;
+the Dodo read-only API key belongs only in Janitor's private environment. Caddy receives the
+randomized webhook path/secret file because it is the only public router for that path. This
+private tree is the authoritative copy and must never be added to this repository.
 
 See [`LICENSE`](./LICENSE) for licensing.

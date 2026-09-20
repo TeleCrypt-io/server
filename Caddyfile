@@ -1,49 +1,19 @@
-# TeleCrypt.io plain-HTTP reverse proxy.
-# TLS is terminated by the upstream proxy; this listener serves the shared
-# Podman pod on the VM's private port 8080.
+# Plain HTTP reverse proxy inside the private Podman pod.
+# TLS is terminated by the upstream HAProxy; this listener is never public.
 {
 	auto_https off
 }
 
-(common) {
-	log {
-		format filter {
-			request>uri regexp "[?].*" "?[REDACTED]"
-			request>headers>Authorization delete
-			request>headers>Cookie delete
-			request>headers>Proxy-Authorization delete
-			resp_headers>Set-Cookie delete
-		}
-	}
-}
-
 http://{$SERVER_NAME}:8080 {
-	import common
-
-	header /.well-known/matrix/* {
-		Content-Type "application/json"
-		Access-Control-Allow-Origin "*"
-		Cache-Control "max-age=3600"
-	}
-
 	@well_known_client {
 		method GET
 		path /.well-known/matrix/client
 	}
 	handle @well_known_client {
-		respond `{
-				"m.homeserver": {
-					"base_url": "https://backend.{$SERVER_NAME}"
-				},
-				"org.matrix.msc2965.authentication": {
-					"issuer": "https://backend.{$SERVER_NAME}/",
-					"account": "https://backend.{$SERVER_NAME}/account/"
-				},
-				"org.matrix.msc4143.rtc_foci": [{
-					"type": "livekit",
-					"livekit_service_url": "https://backend.{$SERVER_NAME}"
-				}]
-			}`
+		header Content-Type application/json
+		header Access-Control-Allow-Origin "*"
+		header Cache-Control "max-age=3600"
+		respond `{ "m.homeserver": { "base_url": "https://backend.{$SERVER_NAME}" }, "org.matrix.msc2965.authentication": { "issuer": "https://backend.{$SERVER_NAME}/", "account": "https://backend.{$SERVER_NAME}/account/" }, "org.matrix.msc4143.rtc_foci": [{ "type": "livekit", "livekit_service_url": "https://backend.{$SERVER_NAME}" }] }`
 	}
 
 	@well_known_server {
@@ -51,7 +21,8 @@ http://{$SERVER_NAME}:8080 {
 		path /.well-known/matrix/server
 	}
 	handle @well_known_server {
-		respond `{"m.server":"backend.{$SERVER_NAME}:443"}`
+		header Content-Type application/json
+		respond `{ "m.server": "backend.{$SERVER_NAME}:443" }`
 	}
 
 	@production_apex host telecrypt.io
@@ -59,31 +30,33 @@ http://{$SERVER_NAME}:8080 {
 		redir https://www.telecrypt.io{http.request.uri.path} 301
 	}
 
+	# The service has no public root resource. Keep it explicit so an unmatched
+	# request cannot accidentally fall through to MAS or another component.
+	@root path /
+	handle @root {
+		respond 418
+	}
 	handle {
-		respond "Not Found" 404
+		respond 418
 	}
 }
 
 http://backend.{$SERVER_NAME}:8080 {
-	import common
-
 	@mas_compat path_regexp ^/_matrix/client/[^/]+/(logout|refresh)/?$
 	@synapse path /_matrix/*
-	@redpill path /redpill
+	@registration path /redpill
 	@plan path /plan/*
 	@cashier path {$DODO_WEBHOOK_PATH}
 	@lk_jwt path /sfu/get /get_token /delegate_delayed_leave /sfu_webhook
-	@mas {
-		path /login /logout /register /register/* /account /account/* /authorize /consent/* /link /device/* /recover /recover/* /upstream/* /complete-compat-sso/*
-		path /oauth2/* /graphql /assets/* /.well-known/openid-configuration /.well-known/webfinger /.well-known/change-password
-	}
+	@mas path /login /logout /register /register/* /account /account/* /authorize /consent/* /link /device/* /recover /recover/* /upstream/* /complete-compat-sso/* /oauth2/* /graphql /assets/* /.well-known/openid-configuration /.well-known/webfinger /.well-known/change-password
+
 	handle @mas_compat {
 		reverse_proxy 127.0.0.1:8082
 	}
 	handle @synapse {
 		reverse_proxy 127.0.0.1:8008
 	}
-	handle @redpill {
+	handle @registration {
 		reverse_proxy 127.0.0.1:9009
 	}
 	handle @plan {
@@ -95,10 +68,11 @@ http://backend.{$SERVER_NAME}:8080 {
 	handle @lk_jwt {
 		reverse_proxy 127.0.0.1:9013
 	}
-
 	handle @mas {
 		reverse_proxy 127.0.0.1:8082
 	}
+
+	# All other backend paths are intentionally rejected.
 	handle {
 		respond 418
 	}
