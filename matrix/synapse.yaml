@@ -62,9 +62,10 @@ password_config:
 
 report_stats: false
 
-# Custom user types used by the local policy projection. A missing value remains the initial
-# Free/unclaimed state; the module treats it as restricted and never invents a paid state.
+# Custom user types used by the local policy projection. New accounts start in the native
+# unverified state; Cashier changes this field only after an explicit billing transition.
 user_types:
+  default_user_type: wild
   extra_user_types:
     - wild
     - verified
