@@ -1,10 +1,9 @@
 [Unit]
 Description=TeleCrypt pasta pod
-PartOf=telecrypt.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 EnvironmentFile=/home/ubuntu/salt_config/telecrypt-deployment.env
 ExecStart=/usr/bin/podman pod create --replace --name=telecrypt --network=pasta --publish=${INGRESS_BIND_ADDRESS}:8080:8080
-ExecStop=/usr/bin/podman pod stop --time 15 telecrypt
+ExecStop=/usr/bin/podman pod rm --force --ignore --time 15 telecrypt
