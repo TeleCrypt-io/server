@@ -37,7 +37,7 @@
   {% set _ = image_digests.update({key: images[key]["digest"]}) %}
 {% endfor %}
 {% set activation = {
-  "status": "succeeded",
+  "status": "pending",
   "server_name": vars["server"]["name"],
   "billing_environment": vars["server"]["billing_environment"],
   "release": tag,
@@ -77,30 +77,7 @@ telecrypt-image-environment:
       - cmd: telecrypt-pull-{{ key|lower|replace("_", "-") }}
 {% endfor %}
 
-telecrypt-activate-stack:
-  cmd.run:
-    - name: >-
-        /usr/bin/systemctl --user daemon-reload &&
-        /usr/bin/systemctl --user start telecrypt-pod.service &&
-        /usr/bin/systemctl --user restart
-        telecrypt-mas.service
-        telecrypt-lk-jwt.service
-        telecrypt-synapse.service
-        telecrypt-registration.service
-        telecrypt-plan.service
-        telecrypt-cashier.service
-        telecrypt-caddy.service &&
-        /usr/bin/systemctl --user start telecrypt.target
-    - runas: ubuntu
-    - env: {{ env }}
-    - shell: /bin/bash
-    - onchanges:
-      - file: telecrypt-current-release
-      - file: telecrypt-image-environment
-    - require:
-      - file: telecrypt-image-environment
-
-telecrypt-activation:
+telecrypt-activation-pending:
   file.serialize:
     - name: {{ data_dir }}/deploy-state/activation.json
     - serializer: json
@@ -109,5 +86,62 @@ telecrypt-activation:
     - group: ubuntu
     - mode: '0600'
     - show_changes: false
+    - unless: >-
+        /usr/bin/python3 -c 'import json,sys;
+        d=json.load(open(sys.argv[1], encoding="utf-8"));
+        sys.exit(0 if d.get("status") == "succeeded" and d.get("release") == sys.argv[2] else 1)'
+        {{ data_dir }}/deploy-state/activation.json {{ tag }}
+    - require:
+      - file: telecrypt-image-environment
+
+telecrypt-activate-stack:
+  cmd.run:
+    - name: >-
+        if /usr/bin/systemctl --user daemon-reload &&
+           /usr/bin/systemctl --user start telecrypt-pod.service &&
+           /usr/bin/systemctl --user restart
+           telecrypt-mas.service
+           telecrypt-lk-jwt.service
+           telecrypt-synapse.service
+           telecrypt-registration.service
+           telecrypt-plan.service
+           telecrypt-cashier.service
+           telecrypt-caddy.service &&
+           /usr/bin/systemctl --user start telecrypt.target; then
+          exit 0
+        else
+          status=$?
+          /usr/bin/python3 -c 'import json,os,sys;
+          p=sys.argv[1]; d=json.load(open(p, encoding="utf-8")); d["status"]="failed";
+          t=p+".tmp"; f=open(t, "w", encoding="utf-8"); json.dump(d, f, sort_keys=True); f.write("\\n"); f.close(); os.chmod(t, 0o600); os.replace(t, p)'
+          {{ data_dir }}/deploy-state/activation.json
+          exit "$status"
+        fi
+    - runas: ubuntu
+    - env: {{ env }}
+    - shell: /bin/bash
+    - unless: >-
+        /usr/bin/python3 -c 'import json,sys;
+        d=json.load(open(sys.argv[1], encoding="utf-8"));
+        sys.exit(0 if d.get("status") == "succeeded" and d.get("release") == sys.argv[2] else 1)'
+        {{ data_dir }}/deploy-state/activation.json {{ tag }}
+    - require:
+      - file: telecrypt-activation-pending
+
+telecrypt-activation:
+  cmd.run:
+    - name: >-
+        /usr/bin/python3 -c 'import json,os,sys;
+        p=sys.argv[1]; d=json.load(open(p, encoding="utf-8")); d["status"]="succeeded";
+        t=p+".tmp"; f=open(t, "w", encoding="utf-8"); json.dump(d, f, sort_keys=True); f.write("\\n"); f.close(); os.chmod(t, 0o600); os.replace(t, p)'
+        {{ data_dir }}/deploy-state/activation.json
+    - runas: ubuntu
+    - env: {{ env }}
+    - shell: /bin/bash
+    - unless: >-
+        /usr/bin/python3 -c 'import json,sys;
+        d=json.load(open(sys.argv[1], encoding="utf-8"));
+        sys.exit(0 if d.get("status") == "succeeded" and d.get("release") == sys.argv[2] else 1)'
+        {{ data_dir }}/deploy-state/activation.json {{ tag }}
     - require:
       - cmd: telecrypt-activate-stack
