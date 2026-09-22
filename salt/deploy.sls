@@ -98,8 +98,7 @@ telecrypt-activate-stack:
   cmd.run:
     - name: |
         if /usr/bin/systemctl --user daemon-reload \
-           && /usr/bin/systemctl --user start telecrypt-pod.service \
-           && /usr/bin/systemctl --user restart telecrypt-mas.service telecrypt-lk-jwt.service telecrypt-synapse.service telecrypt-registration.service telecrypt-plan.service telecrypt-cashier.service telecrypt-caddy.service \
+           && /usr/bin/systemctl --user restart telecrypt-pod.service \
            && /usr/bin/systemctl --user start telecrypt.target
         then
           exit 0
