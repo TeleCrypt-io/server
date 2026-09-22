@@ -122,6 +122,8 @@ telecrypt-pod-refresh:
       - file: telecrypt-unit-telecrypt-pod-service
       - file: telecrypt-unit-telecrypt-target
       - file: telecrypt-deployment-environment
+      - cmd: telecrypt-migrate-unit-telecrypt-pod-service
+      - cmd: telecrypt-migrate-unit-telecrypt-target
     - require:
       - file: telecrypt-activation-pending
       - cmd: telecrypt-clear-pod-refresh-marker
@@ -175,6 +177,15 @@ telecrypt-pod-refresh:
     "telecrypt-secret-synapse-signing-key"
   )
 } %}
+{% set service_migration_triggers = {
+  "caddy": ("telecrypt-migrate-quadlet-telecrypt-caddy-container",),
+  "cashier": ("telecrypt-migrate-quadlet-telecrypt-cashier-container",),
+  "lk-jwt": ("telecrypt-migrate-quadlet-telecrypt-lk-jwt-container",),
+  "mas": ("telecrypt-migrate-quadlet-telecrypt-mas-container",),
+  "plan": ("telecrypt-migrate-quadlet-telecrypt-plan-container",),
+  "registration": ("telecrypt-migrate-quadlet-telecrypt-registration-container",),
+  "synapse": ("telecrypt-migrate-quadlet-telecrypt-synapse-container",)
+} %}
 
 {% for service, triggers in service_triggers.items() %}
 telecrypt-refresh-{{ service }}:
@@ -187,12 +198,18 @@ telecrypt-refresh-{{ service }}:
 {% for trigger in triggers %}
       - file: {{ trigger }}
 {% endfor %}
+{% for trigger in service_migration_triggers[service] %}
+      - cmd: {{ trigger }}
+{% endfor %}
     - require:
       - file: telecrypt-activation-pending
       - cmd: telecrypt-clear-pod-refresh-marker
       - cmd: telecrypt-user-daemon-reload
 {% for trigger in triggers %}
       - file: {{ trigger }}
+{% endfor %}
+{% for trigger in service_migration_triggers[service] %}
+      - cmd: {{ trigger }}
 {% endfor %}
 {% endfor %}
 

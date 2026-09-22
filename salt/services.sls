@@ -7,6 +7,7 @@
 } %}
 
 include:
+  - salt.release
   - salt.units
 
 telecrypt-target-enabled:
@@ -49,5 +50,6 @@ telecrypt-janitor-timer-restarted-after-change:
     - env: {{ env }}
     - onchanges:
       - file: telecrypt-unit-telecrypt-janitor-timer
+      - cmd: telecrypt-migrate-unit-telecrypt-janitor-timer
     - require:
       - cmd: telecrypt-janitor-timer-started

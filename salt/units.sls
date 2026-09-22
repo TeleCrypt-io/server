@@ -1,3 +1,6 @@
+{% set data_dir = "/home/ubuntu/salt_config" %}
+{% set release_tag = pillar["telecrypt"]["release"]["tag"] %}
+{% set release_dir = data_dir ~ "/releases/" ~ release_tag %}
 {% set unit_dir = "/home/ubuntu/.config/systemd/user" %}
 {% set quadlet_dir = "/home/ubuntu/.config/containers/systemd" %}
 {% set service_units = (
@@ -33,10 +36,20 @@ telecrypt-quadlet-directory:
     - makedirs: true
 
 {% for name in service_units %}
+telecrypt-migrate-unit-{{ name|replace(".", "-") }}:
+  cmd.run:
+    - name: >-
+        /usr/bin/cp --remove-destination --preserve=mode,ownership
+        {{ release_dir }}/systemd/{{ name }} {{ unit_dir }}/{{ name }}
+    - onlyif: /usr/bin/test -L {{ unit_dir }}/{{ name }}
+    - require:
+      - file: telecrypt-user-unit-directory
+      - file: telecrypt-current-release
+
 telecrypt-unit-{{ name|replace(".", "-") }}:
   file.managed:
     - name: {{ unit_dir }}/{{ name }}
-    - source: salt://systemd/{{ name }}
+    - source: {{ release_dir }}/systemd/{{ name }}
     - user: ubuntu
     - group: ubuntu
     - mode: '0644'
@@ -44,13 +57,25 @@ telecrypt-unit-{{ name|replace(".", "-") }}:
     - follow_symlinks: false
     - require:
       - file: telecrypt-user-unit-directory
+      - file: telecrypt-current-release
+      - cmd: telecrypt-migrate-unit-{{ name|replace(".", "-") }}
 {% endfor %}
 
 {% for name in quadlet_units %}
+telecrypt-migrate-quadlet-{{ name|replace(".", "-") }}:
+  cmd.run:
+    - name: >-
+        /usr/bin/cp --remove-destination --preserve=mode,ownership
+        {{ release_dir }}/systemd/quadlet/{{ name }} {{ quadlet_dir }}/{{ name }}
+    - onlyif: /usr/bin/test -L {{ quadlet_dir }}/{{ name }}
+    - require:
+      - file: telecrypt-quadlet-directory
+      - file: telecrypt-current-release
+
 telecrypt-quadlet-{{ name|replace(".", "-") }}:
   file.managed:
     - name: {{ quadlet_dir }}/{{ name }}
-    - source: salt://systemd/quadlet/{{ name }}
+    - source: {{ release_dir }}/systemd/quadlet/{{ name }}
     - user: ubuntu
     - group: ubuntu
     - mode: '0644'
@@ -58,6 +83,8 @@ telecrypt-quadlet-{{ name|replace(".", "-") }}:
     - follow_symlinks: false
     - require:
       - file: telecrypt-quadlet-directory
+      - file: telecrypt-current-release
+      - cmd: telecrypt-migrate-quadlet-{{ name|replace(".", "-") }}
 {% endfor %}
 
 telecrypt-user-daemon-reload:
@@ -74,6 +101,12 @@ telecrypt-user-daemon-reload:
 {% endfor %}
 {% for name in quadlet_units %}
       - file: telecrypt-quadlet-{{ name|replace(".", "-") }}
+{% endfor %}
+{% for name in service_units %}
+      - cmd: telecrypt-migrate-unit-{{ name|replace(".", "-") }}
+{% endfor %}
+{% for name in quadlet_units %}
+      - cmd: telecrypt-migrate-quadlet-{{ name|replace(".", "-") }}
 {% endfor %}
     - require:
       - file: telecrypt-user-unit-directory

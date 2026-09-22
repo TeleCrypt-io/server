@@ -3,6 +3,7 @@
 {% set operator = vars["operator"] %}
 {% set mas = vars["mas"] %}
 {% set data_dir = "/home/ubuntu/salt_config" %}
+{% set release_dir = data_dir ~ "/releases/" ~ vars["release"]["tag"] %}
 {% set runtime_dir = data_dir ~ "/runtime" %}
 {% set secrets_dir = data_dir ~ "/secrets" %}
 {% set image_env_dir = data_dir ~ "/image-env" %}
@@ -89,7 +90,7 @@ telecrypt-deployment-environment:
 telecrypt-synapse-runtime:
   file.managed:
     - name: {{ runtime_dir }}/synapse.runtime.yaml
-    - source: salt://matrix/synapse.runtime.yaml.j2
+    - source: {{ release_dir }}/matrix/synapse.runtime.yaml.j2
     - template: jinja
     - user: ubuntu
     - group: ubuntu
@@ -97,44 +98,48 @@ telecrypt-synapse-runtime:
     - show_changes: false
     - require:
       - file: telecrypt-runtime-directory
+      - file: telecrypt-current-release
 
 telecrypt-caddy-config:
   file.managed:
     - name: {{ runtime_dir }}/Caddyfile
-    - source: salt://Caddyfile
+    - source: {{ release_dir }}/Caddyfile
     - user: ubuntu
     - group: ubuntu
     - mode: '0644'
     - show_changes: false
     - require:
       - file: telecrypt-runtime-directory
+      - file: telecrypt-current-release
 
 telecrypt-synapse-config:
   file.managed:
     - name: {{ runtime_dir }}/synapse.yaml
-    - source: salt://matrix/synapse.yaml
+    - source: {{ release_dir }}/matrix/synapse.yaml
     - user: ubuntu
     - group: ubuntu
     - mode: '0644'
     - show_changes: false
     - require:
       - file: telecrypt-runtime-directory
+      - file: telecrypt-current-release
 
 telecrypt-mas-config:
   file.managed:
     - name: {{ runtime_dir }}/mas.yaml
-    - source: salt://matrix/mas.yaml
+    - source: {{ release_dir }}/matrix/mas.yaml
     - user: ubuntu
     - group: ubuntu
     - mode: '0644'
     - show_changes: false
     - require:
       - file: telecrypt-runtime-directory
+      - file: telecrypt-current-release
 
 telecrypt-synapse-log-config:
   file.managed:
     - name: {{ runtime_dir }}/synapse.log.config
-    - source: salt://matrix/synapse.log.config.j2
+    - source: {{ release_dir }}/matrix/synapse.log.config.j2
     - template: jinja
     - user: ubuntu
     - group: ubuntu
@@ -142,11 +147,12 @@ telecrypt-synapse-log-config:
     - show_changes: false
     - require:
       - file: telecrypt-runtime-directory
+      - file: telecrypt-current-release
 
 telecrypt-mas-runtime:
   file.managed:
     - name: {{ runtime_dir }}/mas.runtime.yaml
-    - source: salt://matrix/mas.runtime.yaml.j2
+    - source: {{ release_dir }}/matrix/mas.runtime.yaml.j2
     - template: jinja
     - user: ubuntu
     - group: ubuntu
@@ -154,6 +160,7 @@ telecrypt-mas-runtime:
     - show_changes: false
     - require:
       - file: telecrypt-runtime-directory
+      - file: telecrypt-current-release
 
 telecrypt-mas-environment:
   file.managed:
