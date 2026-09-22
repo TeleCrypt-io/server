@@ -96,25 +96,16 @@ telecrypt-activation-pending:
 
 telecrypt-activate-stack:
   cmd.run:
-    - name: >-
-        if /usr/bin/systemctl --user daemon-reload &&
-           /usr/bin/systemctl --user start telecrypt-pod.service &&
-           /usr/bin/systemctl --user restart
-           telecrypt-mas.service
-           telecrypt-lk-jwt.service
-           telecrypt-synapse.service
-           telecrypt-registration.service
-           telecrypt-plan.service
-           telecrypt-cashier.service
-           telecrypt-caddy.service &&
-           /usr/bin/systemctl --user start telecrypt.target; then
+    - name: |
+        if /usr/bin/systemctl --user daemon-reload \
+           && /usr/bin/systemctl --user start telecrypt-pod.service \
+           && /usr/bin/systemctl --user restart telecrypt-mas.service telecrypt-lk-jwt.service telecrypt-synapse.service telecrypt-registration.service telecrypt-plan.service telecrypt-cashier.service telecrypt-caddy.service \
+           && /usr/bin/systemctl --user start telecrypt.target
+        then
           exit 0
         else
           status=$?
-          /usr/bin/python3 -c 'import json,os,sys;
-          p=sys.argv[1]; d=json.load(open(p, encoding="utf-8")); d["status"]="failed";
-          t=p+".tmp"; f=open(t, "w", encoding="utf-8"); json.dump(d, f, sort_keys=True); f.write("\\n"); f.close(); os.chmod(t, 0o600); os.replace(t, p)'
-          {{ data_dir }}/deploy-state/activation.json
+          /usr/bin/python3 -c 'import json,os,sys; p=sys.argv[1]; d=json.load(open(p, encoding="utf-8")); d["status"]="failed"; t=p+".tmp"; f=open(t, "w", encoding="utf-8"); json.dump(d, f, sort_keys=True); f.write("\n"); f.close(); os.chmod(t, 0o600); os.replace(t, p)' "{{ data_dir }}/deploy-state/activation.json" || true
           exit "$status"
         fi
     - runas: ubuntu
@@ -131,10 +122,7 @@ telecrypt-activate-stack:
 telecrypt-activation:
   cmd.run:
     - name: >-
-        /usr/bin/python3 -c 'import json,os,sys;
-        p=sys.argv[1]; d=json.load(open(p, encoding="utf-8")); d["status"]="succeeded";
-        t=p+".tmp"; f=open(t, "w", encoding="utf-8"); json.dump(d, f, sort_keys=True); f.write("\\n"); f.close(); os.chmod(t, 0o600); os.replace(t, p)'
-        {{ data_dir }}/deploy-state/activation.json
+        /usr/bin/python3 -c 'import json,os,sys; p=sys.argv[1]; d=json.load(open(p, encoding="utf-8")); d["status"]="succeeded"; t=p+".tmp"; f=open(t, "w", encoding="utf-8"); json.dump(d, f, sort_keys=True); f.write("\n"); f.close(); os.chmod(t, 0o600); os.replace(t, p)' "{{ data_dir }}/deploy-state/activation.json"
     - runas: ubuntu
     - env: {{ env }}
     - shell: /bin/bash
