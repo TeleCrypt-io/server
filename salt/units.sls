@@ -41,6 +41,7 @@ telecrypt-unit-{{ name|replace(".", "-") }}:
     - group: ubuntu
     - mode: '0644'
     - force: true
+    - follow_symlinks: false
     - require:
       - file: telecrypt-user-unit-directory
 {% endfor %}
@@ -54,6 +55,7 @@ telecrypt-quadlet-{{ name|replace(".", "-") }}:
     - group: ubuntu
     - mode: '0644'
     - force: true
+    - follow_symlinks: false
     - require:
       - file: telecrypt-quadlet-directory
 {% endfor %}

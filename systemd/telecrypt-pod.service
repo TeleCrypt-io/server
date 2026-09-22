@@ -14,8 +14,8 @@ RestartSec=2
 TimeoutStopSec=70
 Environment=PODMAN_SYSTEMD_UNIT=%n
 EnvironmentFile=/home/ubuntu/salt_config/telecrypt-deployment.env
-ExecStartPre=/usr/bin/podman pod create --infra-conmon-pidfile=%t/%N.pid --pod-id-file=%t/%N.pod-id --exit-policy=stop --replace --name=telecrypt --network=pasta --publish=${INGRESS_BIND_ADDRESS}:8080:8080
-ExecStart=/usr/bin/podman pod start --pod-id-file=%t/%N.pod-id
-ExecStop=/usr/bin/podman pod stop --ignore --pod-id-file=%t/%N.pod-id --time 10
-ExecStopPost=/usr/bin/podman pod rm --ignore --force --pod-id-file=%t/%N.pod-id
+ExecStartPre=/usr/bin/podman pod create --infra-conmon-pidfile=%t/%N.pid --exit-policy=stop --replace --name=telecrypt --network=pasta --publish=${INGRESS_BIND_ADDRESS}:8080:8080
+ExecStart=/usr/bin/podman pod start telecrypt
+ExecStop=/usr/bin/podman pod stop --ignore telecrypt --time 10
+ExecStopPost=/usr/bin/podman pod rm --ignore --force telecrypt
 PIDFile=%t/%N.pid
