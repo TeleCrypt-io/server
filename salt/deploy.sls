@@ -80,9 +80,8 @@ telecrypt-image-environment:
 telecrypt-activate-stack:
   cmd.run:
     - name: >-
-        /usr/bin/systemctl --user stop telecrypt.target;
-        /usr/bin/systemctl --user daemon-reload;
-        /usr/bin/systemctl --user start telecrypt.target
+        /usr/bin/systemctl --user daemon-reload &&
+        /usr/bin/systemctl --user restart telecrypt.target
     - runas: ubuntu
     - env: {{ env }}
     - shell: /bin/bash
