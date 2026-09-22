@@ -9,44 +9,6 @@
 include:
   - salt.units
 
-telecrypt-old-janitor-timer-link:
-  cmd.run:
-    - name: /usr/bin/unlink /home/ubuntu/.config/systemd/user/telecrypt-janitor.timer
-    - onlyif: /usr/bin/test -L /home/ubuntu/.config/systemd/user/telecrypt-janitor.timer
-
-telecrypt-janitor-timer-file:
-  file.managed:
-    - name: /home/ubuntu/.config/systemd/user/telecrypt-janitor.timer
-    - source: salt://systemd/telecrypt-janitor.timer
-    - user: ubuntu
-    - group: ubuntu
-    - mode: '0644'
-    - require:
-      - file: telecrypt-user-unit-directory
-      - cmd: telecrypt-old-janitor-timer-link
-
-telecrypt-user-daemon-reload:
-  cmd.run:
-    - name: systemctl --user daemon-reload
-    - runas: ubuntu
-    - env: {{ env }}
-    - onchanges:
-      - file: telecrypt-janitor-timer-file
-{% for name in ("telecrypt-pod.service", "telecrypt.target", "telecrypt-janitor.service") %}
-      - file: telecrypt-unit-link-{{ name|replace(".", "-") }}
-{% endfor %}
-{% for name in ("telecrypt-caddy.container", "telecrypt-cashier.container", "telecrypt-lk-jwt.container", "telecrypt-mas.container", "telecrypt-plan.container", "telecrypt-registration.container", "telecrypt-synapse.container") %}
-      - file: telecrypt-quadlet-link-{{ name|replace(".", "-") }}
-{% endfor %}
-    - require:
-      - file: telecrypt-janitor-timer-file
-{% for name in ("telecrypt-pod.service", "telecrypt.target", "telecrypt-janitor.service") %}
-      - file: telecrypt-unit-link-{{ name|replace(".", "-") }}
-{% endfor %}
-{% for name in ("telecrypt-caddy.container", "telecrypt-cashier.container", "telecrypt-lk-jwt.container", "telecrypt-mas.container", "telecrypt-plan.container", "telecrypt-registration.container", "telecrypt-synapse.container") %}
-      - file: telecrypt-quadlet-link-{{ name|replace(".", "-") }}
-{% endfor %}
-
 telecrypt-target-enabled:
   cmd.run:
     - name: systemctl --user enable --force telecrypt.target
@@ -86,6 +48,6 @@ telecrypt-janitor-timer-restarted-after-change:
     - runas: ubuntu
     - env: {{ env }}
     - onchanges:
-      - file: telecrypt-janitor-timer-file
+      - file: telecrypt-unit-telecrypt-janitor-timer
     - require:
       - cmd: telecrypt-janitor-timer-started

@@ -1,6 +1,6 @@
 [Unit]
 Description=TeleCrypt LiveKit JWT service
-Requires=telecrypt-pod.service
+BindsTo=telecrypt-pod.service
 After=telecrypt-pod.service
 PartOf=telecrypt.target
 
@@ -26,6 +26,6 @@ HealthStartPeriod=15s
 
 [Service]
 EnvironmentFile=/home/ubuntu/salt_config/telecrypt-deployment.env
-EnvironmentFile=/home/ubuntu/salt_config/telecrypt-images.env
+EnvironmentFile=/home/ubuntu/salt_config/image-env/lk-jwt-image.env
 Restart=always
 RestartSec=2

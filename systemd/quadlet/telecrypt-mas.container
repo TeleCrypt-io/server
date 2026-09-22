@@ -1,6 +1,6 @@
 [Unit]
 Description=TeleCrypt MAS
-Requires=telecrypt-pod.service
+BindsTo=telecrypt-pod.service
 After=telecrypt-pod.service
 PartOf=telecrypt.target
 
@@ -15,7 +15,7 @@ Pull=never
 User=991:991
 ReadOnly=true
 DropCapability=ALL
-Volume=/home/ubuntu/salt_config/current/matrix/mas.yaml:/config.yaml:ro
+Volume=/home/ubuntu/salt_config/runtime/mas.yaml:/config.yaml:ro
 Volume=${TELECRYPT_DATA_DIR}/runtime/mas.runtime.yaml:/mas-runtime.yaml:ro
 Volume=${TELECRYPT_DATA_DIR}/secrets/mas.secrets.json:/secrets.json:ro
 Exec=server --config=/config.yaml --config=/secrets.json --config=/mas-runtime.yaml
@@ -27,6 +27,6 @@ HealthStartPeriod=30s
 
 [Service]
 EnvironmentFile=/home/ubuntu/salt_config/telecrypt-deployment.env
-EnvironmentFile=/home/ubuntu/salt_config/telecrypt-images.env
+EnvironmentFile=/home/ubuntu/salt_config/image-env/mas-image.env
 Restart=always
 RestartSec=2

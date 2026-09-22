@@ -1,9 +1,21 @@
 [Unit]
 Description=TeleCrypt pasta pod
+Wants=telecrypt-caddy.service telecrypt-cashier.service telecrypt-lk-jwt.service telecrypt-mas.service telecrypt-plan.service telecrypt-registration.service telecrypt-synapse.service
+Before=telecrypt-caddy.service telecrypt-cashier.service telecrypt-lk-jwt.service telecrypt-mas.service telecrypt-plan.service telecrypt-registration.service telecrypt-synapse.service
+PartOf=telecrypt.target
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=%t/containers
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=forking
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=70
+Environment=PODMAN_SYSTEMD_UNIT=%n
 EnvironmentFile=/home/ubuntu/salt_config/telecrypt-deployment.env
-ExecStart=/usr/bin/podman pod create --replace --name=telecrypt --network=pasta --publish=${INGRESS_BIND_ADDRESS}:8080:8080
-ExecStop=/usr/bin/podman pod rm --force --ignore --time 15 telecrypt
+ExecStartPre=/usr/bin/podman pod create --infra-conmon-pidfile=%t/%N.pid --pod-id-file=%t/%N.pod-id --exit-policy=stop --replace --name=telecrypt --network=pasta --publish=${INGRESS_BIND_ADDRESS}:8080:8080
+ExecStart=/usr/bin/podman pod start --pod-id-file=%t/%N.pod-id
+ExecStop=/usr/bin/podman pod stop --ignore --pod-id-file=%t/%N.pod-id --time 10
+ExecStopPost=/usr/bin/podman pod rm --ignore --force --pod-id-file=%t/%N.pod-id
+PIDFile=%t/%N.pid

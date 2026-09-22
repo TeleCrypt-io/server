@@ -21,9 +21,10 @@ sudo salt stage state.apply salt.services
 ```
 
 The `salt.deploy` state reads `server-state-images.json` from the selected master file root,
-pulls each image by its recorded digest, switches `/home/ubuntu/salt_config/current`, and starts
-the tracked `telecrypt.target`. Repeating it with the same release is a no-op. `salt.services`
-keeps the boot target and Janitor timer enabled.
+pulls each image by its recorded digest, switches `/home/ubuntu/salt_config/current`, and applies
+the runtime inputs and service definitions. It restarts only services whose effective inputs
+changed; pod-level changes recreate the shared pod. Repeating it with the same release is a no-op.
+`salt.services` keeps the boot target and Janitor timer enabled.
 
 Before the first activation, extract the exact server release into the master's private
 `releases/<tag>` directory and place its matching release asset beside it as
@@ -36,8 +37,8 @@ master address and fingerprint, and starts the minion. The VM image is expected 
 owner's recovery SSH key; Salt does not replace `authorized_keys`.
 
 Store each target's exact secret files under
-`~/servers_salt_configs/pillar/hosts/<minion-id>/secrets/`. The master's built-in
-`file_tree` Pillar exposes only the matching target's files as Pillar values, and `salt.host`
+`~/salt_secrets/hosts/<minion-id>/secrets/`. The master's built-in
+`file_tree` Pillar exposes only the matching target's files as Pillar values, and `salt.deploy`
 writes them to `/home/ubuntu/salt_config/secrets/` with their required private modes. Cashier
 keeps only its database, Synapse projection token, webhook secret and Plan request verifier;
 the Dodo read-only API key belongs only in Janitor's private environment. Caddy receives the

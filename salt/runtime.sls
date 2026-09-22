@@ -5,6 +5,7 @@
 {% set data_dir = "/home/ubuntu/salt_config" %}
 {% set runtime_dir = data_dir ~ "/runtime" %}
 {% set secrets_dir = data_dir ~ "/secrets" %}
+{% set image_env_dir = data_dir ~ "/image-env" %}
 {% set deploy_state_dir = data_dir ~ "/deploy-state" %}
 {% set mas_rust_log = mas["rust_log"] %}
 
@@ -15,8 +16,6 @@ telecrypt-data-directory:
     - group: ubuntu
     - mode: '0700'
     - makedirs: true
-    - require:
-      - user: telecrypt-operator
 
 telecrypt-runtime-directory:
   file.directory:
@@ -33,6 +32,16 @@ telecrypt-secrets-directory:
     - user: ubuntu
     - group: ubuntu
     - mode: '0700'
+    - require:
+      - file: telecrypt-data-directory
+
+telecrypt-image-environment-directory:
+  file.directory:
+    - name: {{ image_env_dir }}
+    - user: ubuntu
+    - group: ubuntu
+    - mode: '0700'
+    - makedirs: true
     - require:
       - file: telecrypt-data-directory
 
@@ -76,14 +85,45 @@ telecrypt-deployment-environment:
     - group: ubuntu
     - mode: '0600'
     - show_changes: false
-    - require:
-      - user: telecrypt-operator
 
 telecrypt-synapse-runtime:
   file.managed:
     - name: {{ runtime_dir }}/synapse.runtime.yaml
     - source: salt://matrix/synapse.runtime.yaml.j2
     - template: jinja
+    - user: ubuntu
+    - group: ubuntu
+    - mode: '0644'
+    - show_changes: false
+    - require:
+      - file: telecrypt-runtime-directory
+
+telecrypt-caddy-config:
+  file.managed:
+    - name: {{ runtime_dir }}/Caddyfile
+    - source: salt://Caddyfile
+    - user: ubuntu
+    - group: ubuntu
+    - mode: '0644'
+    - show_changes: false
+    - require:
+      - file: telecrypt-runtime-directory
+
+telecrypt-synapse-config:
+  file.managed:
+    - name: {{ runtime_dir }}/synapse.yaml
+    - source: salt://matrix/synapse.yaml
+    - user: ubuntu
+    - group: ubuntu
+    - mode: '0644'
+    - show_changes: false
+    - require:
+      - file: telecrypt-runtime-directory
+
+telecrypt-mas-config:
+  file.managed:
+    - name: {{ runtime_dir }}/mas.yaml
+    - source: salt://matrix/mas.yaml
     - user: ubuntu
     - group: ubuntu
     - mode: '0644'

@@ -1,6 +1,20 @@
-{% set data_dir = "/home/ubuntu/salt_config" %}
 {% set unit_dir = "/home/ubuntu/.config/systemd/user" %}
 {% set quadlet_dir = "/home/ubuntu/.config/containers/systemd" %}
+{% set service_units = (
+  "telecrypt-pod.service",
+  "telecrypt.target",
+  "telecrypt-janitor.service",
+  "telecrypt-janitor.timer"
+) %}
+{% set quadlet_units = (
+  "telecrypt-caddy.container",
+  "telecrypt-cashier.container",
+  "telecrypt-lk-jwt.container",
+  "telecrypt-mas.container",
+  "telecrypt-plan.container",
+  "telecrypt-registration.container",
+  "telecrypt-synapse.container"
+) %}
 
 telecrypt-user-unit-directory:
   file.directory:
@@ -18,28 +32,53 @@ telecrypt-quadlet-directory:
     - mode: '0775'
     - makedirs: true
 
-{% for name in ("telecrypt-pod.service", "telecrypt.target", "telecrypt-janitor.service") %}
-telecrypt-unit-link-{{ name|replace(".", "-") }}:
-  file.symlink:
+{% for name in service_units %}
+telecrypt-unit-{{ name|replace(".", "-") }}:
+  file.managed:
     - name: {{ unit_dir }}/{{ name }}
-    - target: {{ data_dir }}/current/systemd/{{ name }}
+    - source: salt://systemd/{{ name }}
     - user: ubuntu
     - group: ubuntu
+    - mode: '0644'
     - force: true
-    - atomic: true
     - require:
       - file: telecrypt-user-unit-directory
 {% endfor %}
 
-{% for name in ("telecrypt-caddy.container", "telecrypt-cashier.container", "telecrypt-lk-jwt.container", "telecrypt-mas.container", "telecrypt-plan.container", "telecrypt-registration.container", "telecrypt-synapse.container") %}
-telecrypt-quadlet-link-{{ name|replace(".", "-") }}:
-  file.symlink:
+{% for name in quadlet_units %}
+telecrypt-quadlet-{{ name|replace(".", "-") }}:
+  file.managed:
     - name: {{ quadlet_dir }}/{{ name }}
-    - target: {{ data_dir }}/current/systemd/quadlet/{{ name }}
+    - source: salt://systemd/quadlet/{{ name }}
     - user: ubuntu
     - group: ubuntu
+    - mode: '0644'
     - force: true
-    - atomic: true
     - require:
       - file: telecrypt-quadlet-directory
+{% endfor %}
+
+telecrypt-user-daemon-reload:
+  cmd.run:
+    - name: systemctl --user daemon-reload
+    - runas: ubuntu
+    - env:
+        HOME: /home/ubuntu
+        XDG_RUNTIME_DIR: /run/user/{{ salt["user.info"]("ubuntu").get("uid", 1000)|int }}
+        DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/{{ salt["user.info"]("ubuntu").get("uid", 1000)|int }}/bus
+    - onchanges:
+{% for name in service_units %}
+      - file: telecrypt-unit-{{ name|replace(".", "-") }}
+{% endfor %}
+{% for name in quadlet_units %}
+      - file: telecrypt-quadlet-{{ name|replace(".", "-") }}
+{% endfor %}
+    - require:
+      - file: telecrypt-user-unit-directory
+      - file: telecrypt-quadlet-directory
+{% for name in service_units %}
+      - file: telecrypt-unit-{{ name|replace(".", "-") }}
+{% endfor %}
+{% for name in quadlet_units %}
+      - file: telecrypt-quadlet-{{ name|replace(".", "-") }}
 {% endfor %}

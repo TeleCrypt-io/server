@@ -1,7 +1,3 @@
-include:
-  - salt.runtime
-  - salt.units
-
 {% set operator = pillar["telecrypt"]["operator"] %}
 {% set salt_config = pillar["telecrypt"].get("salt", {}) %}
 

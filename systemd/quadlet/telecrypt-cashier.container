@@ -1,6 +1,6 @@
 [Unit]
 Description=TeleCrypt Cashier
-Requires=telecrypt-pod.service
+BindsTo=telecrypt-pod.service
 Requires=telecrypt-synapse.service
 After=telecrypt-pod.service telecrypt-synapse.service
 PartOf=telecrypt.target
@@ -27,6 +27,6 @@ HealthStartPeriod=30s
 
 [Service]
 EnvironmentFile=/home/ubuntu/salt_config/telecrypt-deployment.env
-EnvironmentFile=/home/ubuntu/salt_config/telecrypt-images.env
+EnvironmentFile=/home/ubuntu/salt_config/image-env/cashier-image.env
 Restart=always
 RestartSec=2

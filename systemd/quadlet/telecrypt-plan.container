@@ -1,6 +1,6 @@
 [Unit]
 Description=TeleCrypt Plan
-Requires=telecrypt-pod.service
+BindsTo=telecrypt-pod.service
 Requires=telecrypt-mas.service
 After=telecrypt-pod.service telecrypt-mas.service
 PartOf=telecrypt.target
@@ -28,6 +28,6 @@ HealthStartPeriod=30s
 
 [Service]
 EnvironmentFile=/home/ubuntu/salt_config/telecrypt-deployment.env
-EnvironmentFile=/home/ubuntu/salt_config/telecrypt-images.env
+EnvironmentFile=/home/ubuntu/salt_config/image-env/controlplane-image.env
 Restart=always
 RestartSec=2

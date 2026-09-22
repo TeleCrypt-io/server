@@ -70,6 +70,11 @@ jobs:
             > "$RUNNER_TEMP/server-state-generated-units"
           test -s "$RUNNER_TEMP/server-state-generated-units"
 
+      - name: Validate pod lifecycle units
+        run: |
+          set -euo pipefail
+          systemd-analyze verify systemd/telecrypt-pod.service systemd/telecrypt.target
+
       - name: Render Salt states with the example pillar
         run: |
           set -euo pipefail
