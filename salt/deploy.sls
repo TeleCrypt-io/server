@@ -9,6 +9,7 @@
 {% set image_env_dir = data_dir ~ "/image-env" %}
 {% set marker = "/run/user/" ~ salt["user.info"]("ubuntu").get("uid", 1000)|int ~ "/telecrypt-pod-refreshed" %}
 {% set uid = salt["user.info"]("ubuntu").get("uid", 1000)|int %}
+{% set pod_pid = "/run/user/" ~ uid ~ "/telecrypt-pod.pid" %}
 {% set env = {
   "HOME": "/home/ubuntu",
   "XDG_RUNTIME_DIR": "/run/user/" ~ uid|string,
@@ -141,7 +142,7 @@ telecrypt-pod-recover:
     - env: {{ env }}
     - shell: /bin/bash
     - onlyif: >-
-        /usr/bin/test ! -s /run/user/{{ uid }}/telecrypt-pod.service.pid
+        /usr/bin/test ! -s {{ pod_pid }}
         && /usr/bin/systemctl --user is-active --quiet telecrypt-pod.service
     - unless: /usr/bin/test -e {{ marker }}
     - require:
