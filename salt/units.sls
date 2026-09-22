@@ -95,19 +95,9 @@ telecrypt-user-daemon-reload:
         HOME: /home/ubuntu
         XDG_RUNTIME_DIR: /run/user/{{ salt["user.info"]("ubuntu").get("uid", 1000)|int }}
         DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/{{ salt["user.info"]("ubuntu").get("uid", 1000)|int }}/bus
-    - onchanges:
-{% for name in service_units %}
-      - file: telecrypt-unit-{{ name|replace(".", "-") }}
-{% endfor %}
-{% for name in quadlet_units %}
-      - file: telecrypt-quadlet-{{ name|replace(".", "-") }}
-{% endfor %}
-{% for name in service_units %}
-      - cmd: telecrypt-migrate-unit-{{ name|replace(".", "-") }}
-{% endfor %}
-{% for name in quadlet_units %}
-      - cmd: telecrypt-migrate-quadlet-{{ name|replace(".", "-") }}
-{% endfor %}
+    - unless: >-
+        /usr/bin/systemctl --user show telecrypt-pod.service
+        -p NeedDaemonReload --value | /usr/bin/grep -qx no
     - require:
       - file: telecrypt-user-unit-directory
       - file: telecrypt-quadlet-directory

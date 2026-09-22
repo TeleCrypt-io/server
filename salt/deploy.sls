@@ -132,6 +132,23 @@ telecrypt-pod-refresh:
       - file: telecrypt-unit-telecrypt-target
       - file: telecrypt-deployment-environment
 
+telecrypt-pod-recover:
+  cmd.run:
+    - name: |
+        /usr/bin/systemctl --user restart telecrypt-pod.service
+        /usr/bin/touch {{ marker }}
+    - runas: ubuntu
+    - env: {{ env }}
+    - shell: /bin/bash
+    - onlyif: >-
+        /usr/bin/test ! -s /run/user/{{ uid }}/telecrypt-pod.service.pid
+        && /usr/bin/systemctl --user is-active --quiet telecrypt-pod.service
+    - unless: /usr/bin/test -e {{ marker }}
+    - require:
+      - file: telecrypt-activation-pending
+      - cmd: telecrypt-clear-pod-refresh-marker
+      - cmd: telecrypt-user-daemon-reload
+
 {% set service_triggers = {
   "caddy": (
     "telecrypt-quadlet-telecrypt-caddy-container",
@@ -237,6 +254,7 @@ telecrypt-start-stack:
       - file: telecrypt-activation-pending
       - cmd: telecrypt-user-daemon-reload
       - cmd: telecrypt-pod-refresh
+      - cmd: telecrypt-pod-recover
       - cmd: telecrypt-refresh-janitor-timer
 {% for service in service_triggers %}
       - cmd: telecrypt-refresh-{{ service }}
