@@ -15,6 +15,7 @@ PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/cashier-plan-token.env
 PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/cashier-synapse-token.env
 PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/cashier-janitor-token.env
 PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/dodo-webhook.env
+PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/cashier-dodo-webhook-secret.env
 PodmanArgs=--sdnotify=healthy
 Pull=never
 User=991:991

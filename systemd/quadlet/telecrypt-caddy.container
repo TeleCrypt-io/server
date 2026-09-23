@@ -12,19 +12,20 @@ ContainerName=telecrypt-caddy
 Image=${CADDY_IMAGE}
 PodmanArgs=--pod=telecrypt
 PodmanArgs=--security-opt=no-new-privileges
-PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/dodo-webhook.env
 Pull=never
 User=65532:65532
 ReadOnly=true
 DropCapability=ALL
 AddCapability=NET_BIND_SERVICE
 Environment=SERVER_NAME=${SERVER_NAME}
+Environment=DODO_WEBHOOK_PATH=${DODO_WEBHOOK_PATH}
 Volume=/home/ubuntu/salt_config/runtime/Caddyfile:/etc/caddy/Caddyfile:ro
 Tmpfs=/config/caddy:rw,mode=1777
 Tmpfs=/data/caddy:rw,mode=1777
 
 [Service]
 EnvironmentFile=/home/ubuntu/salt_config/telecrypt-deployment.env
+EnvironmentFile=/home/ubuntu/salt_config/secrets/dodo-webhook.env
 EnvironmentFile=/home/ubuntu/salt_config/image-env/caddy-image.env
 Restart=always
 RestartSec=2

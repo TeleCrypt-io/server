@@ -164,7 +164,8 @@ telecrypt-pod-recover:
     "telecrypt-secret-cashier-plan-token-env",
     "telecrypt-secret-cashier-synapse-token-env",
     "telecrypt-secret-cashier-janitor-token-env",
-    "telecrypt-secret-dodo-webhook-env"
+    "telecrypt-secret-dodo-webhook-env",
+    "telecrypt-secret-cashier-dodo-webhook-secret-env"
   ),
   "lk-jwt": (
     "telecrypt-quadlet-telecrypt-lk-jwt-container",

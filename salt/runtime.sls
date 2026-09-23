@@ -181,6 +181,7 @@ telecrypt-mas-environment:
   ("cashier-plan-token.env", "0600"),
   ("cashier-synapse-token.env", "0600"),
   ("cashier-janitor-token.env", "0600"),
+  ("cashier-dodo-webhook-secret.env", "0600"),
   ("dodo-webhook.env", "0600"),
   ("livekit.secrets.env", "0600"),
   ("synapse.secrets.json", "0444"),

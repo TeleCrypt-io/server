@@ -48,10 +48,14 @@ with `openssl rand -hex 32`, and store them as 64 lowercase hexadecimal characte
 and Production credentials independent. The source files under the master's private tree remain
 mode `0640` for Salt's reader group; Salt writes target copies as mode `0600` inside the mode
 `0700` secrets directory. Cashier reads all three; Plan, Synapse, and Janitor each read only
-their matching file. Do not provide these token files to Caddy,
-Registration, MAS, or LiveKit JWT. These files are required private inputs for each target and
-must remain outside this repository. The Dodo read-only API key belongs only in Janitor's private
-environment. Caddy receives the webhook routing environment file only because it routes that
-public path.
+their matching file. Do not provide these token files to Caddy, Registration, MAS, or LiveKit JWT.
+These files are required private inputs for each target and must remain outside this repository.
+
+`dodo-webhook.env` contains only `DODO_WEBHOOK_PATH`; Caddy reads it as a systemd environment file
+and passes only that variable into its container. `cashier-dodo-webhook-secret.env` contains only
+`DODO_WEBHOOK_SECRET` and is mounted into Cashier alone. Move the existing webhook secret value
+into that Cashier-only file and remove it from `dodo-webhook.env` when updating each target's
+private inputs. Keep one authoritative copy of the secret. The Dodo read-only API key belongs only
+in Janitor's private environment.
 
 See [`LICENSE`](./LICENSE) for licensing.
