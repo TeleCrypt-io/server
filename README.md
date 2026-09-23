@@ -54,8 +54,8 @@ These files are required private inputs for each target and must remain outside 
 `dodo-webhook.env` contains only `DODO_WEBHOOK_PATH`; Caddy reads it as a systemd environment file
 and passes only that variable into its container. `cashier-dodo-webhook-secret.env` contains only
 `DODO_WEBHOOK_SECRET` and is mounted into Cashier alone. Move the existing webhook secret value
-into that Cashier-only file and remove it from `dodo-webhook.env` when updating each target's
-private inputs. Keep one authoritative copy of the secret. The Dodo read-only API key belongs only
-in Janitor's private environment.
+from `cashier.secrets.env` into that Cashier-only file when updating each target's private inputs.
+Keep `dodo-webhook.env` path-only and keep one authoritative copy of the secret. The Dodo
+read-only API key belongs only in Janitor's private environment.
 
 See [`LICENSE`](./LICENSE) for licensing.
