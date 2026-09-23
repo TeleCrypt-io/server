@@ -22,8 +22,10 @@ sudo salt stage state.apply salt.services
 
 The `salt.deploy` state reads `server-state-images.json` from the selected master file root,
 pulls each image by its recorded digest, switches `/home/ubuntu/salt_config/current`, and applies
-the runtime inputs and service definitions. It restarts only services whose effective inputs
-changed; pod-level changes recreate the shared pod. Repeating it with the same release is a no-op.
+the runtime inputs and service definitions. It reloads the user's systemd manager so generated
+Quadlet units reflect the deployed files, then restarts only services whose effective inputs
+changed; pod-level changes recreate the shared pod. Repeating it with the same release does not
+restart unchanged services.
 `salt.services` keeps the boot target and Janitor timer enabled.
 
 Before the first activation, extract the exact server release into the master's private
