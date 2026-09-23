@@ -10,6 +10,7 @@ ContainerName=telecrypt-synapse
 Image=${SYNAPSE_IMAGE}
 PodmanArgs=--pod=telecrypt
 PodmanArgs=--security-opt=no-new-privileges
+PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/cashier-synapse-token.env
 PodmanArgs=--entrypoint=/telecrypt-synapse-entrypoint
 PodmanArgs=--sdnotify=healthy
 Pull=never

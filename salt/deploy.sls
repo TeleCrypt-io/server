@@ -161,6 +161,9 @@ telecrypt-pod-recover:
     "telecrypt-quadlet-telecrypt-cashier-container",
     "telecrypt-image-env-cashier-image",
     "telecrypt-secret-cashier-secrets-env",
+    "telecrypt-secret-cashier-plan-token-env",
+    "telecrypt-secret-cashier-synapse-token-env",
+    "telecrypt-secret-cashier-janitor-token-env",
     "telecrypt-secret-dodo-webhook-env"
   ),
   "lk-jwt": (
@@ -179,7 +182,8 @@ telecrypt-pod-recover:
   "plan": (
     "telecrypt-quadlet-telecrypt-plan-container",
     "telecrypt-image-env-controlplane-image",
-    "telecrypt-secret-plan-secrets-env"
+    "telecrypt-secret-plan-secrets-env",
+    "telecrypt-secret-cashier-plan-token-env"
   ),
   "registration": (
     "telecrypt-quadlet-telecrypt-registration-container",
@@ -191,6 +195,7 @@ telecrypt-pod-recover:
     "telecrypt-synapse-config",
     "telecrypt-synapse-runtime",
     "telecrypt-synapse-log-config",
+    "telecrypt-secret-cashier-synapse-token-env",
     "telecrypt-secret-synapse-secrets-json",
     "telecrypt-secret-synapse-signing-key"
   )

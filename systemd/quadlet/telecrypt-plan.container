@@ -11,6 +11,7 @@ Image=${CONTROLPLANE_IMAGE}
 PodmanArgs=--pod=telecrypt
 PodmanArgs=--security-opt=no-new-privileges
 PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/plan.secrets.env
+PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/cashier-plan-token.env
 PodmanArgs=--sdnotify=healthy
 Pull=never
 User=991:991

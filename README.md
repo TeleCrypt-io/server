@@ -39,10 +39,19 @@ owner's recovery SSH key; Salt does not replace `authorized_keys`.
 Store each target's exact secret files under
 `~/salt_secrets/hosts/<minion-id>/secrets/`. The master's built-in
 `file_tree` Pillar exposes only the matching target's files as Pillar values, and `salt.deploy`
-writes them to `/home/ubuntu/salt_config/secrets/` with their required private modes. Cashier
-keeps only its database, Synapse projection token, webhook secret and Plan request verifier;
-the Dodo read-only API key belongs only in Janitor's private environment. Caddy receives the
-randomized webhook path/secret file because it is the only public router for that path. This
-private tree is the authoritative copy and must never be added to this repository.
+writes them to `/home/ubuntu/salt_config/secrets/` with their required private modes. Cashier's
+existing private configuration remains in `cashier.secrets.env`. Three separate files carry the
+Cashier service credentials: `cashier-plan-token.env` contains only `CASHIER_PLAN_TOKEN`,
+`cashier-synapse-token.env` only `CASHIER_SYNAPSE_TOKEN`, and `cashier-janitor-token.env` only
+`CASHIER_JANITOR_TOKEN`. Generate each environment's three independent 32-byte random values
+with `openssl rand -hex 32`, and store them as 64 lowercase hexadecimal characters. Keep Stage
+and Production credentials independent. The source files under the master's private tree remain
+mode `0640` for Salt's reader group; Salt writes target copies as mode `0600` inside the mode
+`0700` secrets directory. Cashier reads all three; Plan, Synapse, and Janitor each read only
+their matching file. Do not provide these token files to Caddy,
+Registration, MAS, or LiveKit JWT. These files are required private inputs for each target and
+must remain outside this repository. The Dodo read-only API key belongs only in Janitor's private
+environment. Caddy receives the webhook routing environment file only because it routes that
+public path.
 
 See [`LICENSE`](./LICENSE) for licensing.
