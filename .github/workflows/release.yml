@@ -105,11 +105,14 @@ jobs:
             LK_JWT_IMAGE: {image: "ghcr.io/element-hq/lk-jwt-service:0.7.0", digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
           }}' > "$manifest_file"
           for state in salt.host salt.services salt.release salt.deploy; do
-            sudo salt-call --local --retcode-passthrough --out=raw \
+            sudo salt-call --local --retcode-passthrough --out=json \
               --file-root="$GITHUB_WORKSPACE" --pillar-root="$pillar_dir" \
               state.show_sls "$state" > "$RUNNER_TEMP/${state//./-}-render"
             test -s "$RUNNER_TEMP/${state//./-}-render"
           done
+
+      - name: Test activation receipt transitions
+        run: ./tests/test_activation_receipt.py "$RUNNER_TEMP/salt-deploy-render"
 
       - name: Resolve image tags to immutable digests
         env:

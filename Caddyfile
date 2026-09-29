@@ -30,12 +30,7 @@ http://{$SERVER_NAME}:8080 {
 		redir https://www.telecrypt.io{http.request.uri.path} 301
 	}
 
-	# The service has no public root resource. Keep it explicit so an unmatched
-	# request cannot accidentally fall through to MAS or another component.
-	@root path /
-	handle @root {
-		respond 418
-	}
+	# The service has no public root resource; unmatched paths are rejected.
 	handle {
 		respond 418
 	}

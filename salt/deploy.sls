@@ -7,6 +7,7 @@
 {% set tag = release["tag"] %}
 {% set data_dir = "/home/ubuntu/salt_config" %}
 {% set image_env_dir = data_dir ~ "/image-env" %}
+{% set activation_receipt_path = data_dir ~ "/deploy-state/activation.json" %}
 {% set marker = "/run/user/" ~ salt["user.info"]("ubuntu").get("uid", 1000)|int ~ "/telecrypt-pod-refreshed" %}
 {% set uid = salt["user.info"]("ubuntu").get("uid", 1000)|int %}
 {% set pod_pid = "/run/user/" ~ uid ~ "/telecrypt-pod.pid" %}
@@ -39,8 +40,7 @@
   {% set _ = image_versions.update({key: images[key]["image"]}) %}
   {% set _ = image_digests.update({key: images[key]["digest"]}) %}
 {% endfor %}
-{% set activation = {
-  "status": "pending",
+{% set activation_identity = {
   "server_name": vars["server"]["name"],
   "billing_environment": vars["server"]["billing_environment"],
   "release": tag,
@@ -49,6 +49,13 @@
   "image_versions": image_versions,
   "image_digests": image_digests
 } %}
+{% set activation = {"status": "pending"} %}
+{% set _ = activation.update(activation_identity) %}
+{% set activation_success_receipt = {"status": "succeeded"} %}
+{% set _ = activation_success_receipt.update(activation_identity) %}
+{% macro activation_receipt_check(path, expected) -%}
+/usr/bin/python3 -c 'import json,sys; expected=json.loads({{ (expected | tojson) | tojson }}); receipt=json.load(open({{ path | tojson }}, encoding="utf-8")); sys.exit(0 if receipt == expected else 1)'
+{%- endmacro %}
 
 include:
   - salt.release
@@ -57,7 +64,7 @@ include:
 
 telecrypt-activation-pending:
   file.serialize:
-    - name: {{ data_dir }}/deploy-state/activation.json
+    - name: {{ activation_receipt_path }}
     - serializer: json
     - dataset: {{ activation | tojson }}
     - user: ubuntu
@@ -66,10 +73,7 @@ telecrypt-activation-pending:
     - show_changes: false
     - order: 1
     - unless: >-
-        /usr/bin/python3 -c 'import json,sys;
-        d=json.load(open(sys.argv[1], encoding="utf-8"));
-        sys.exit(0 if d.get("status") == "succeeded" and d.get("release") == sys.argv[2] else 1)'
-        {{ data_dir }}/deploy-state/activation.json {{ tag }}
+        {{ activation_receipt_check(activation_receipt_path, activation_success_receipt) }}
     - require:
       - file: telecrypt-current-release
       - file: telecrypt-deploy-state-directory
@@ -201,16 +205,6 @@ telecrypt-pod-recover:
     "telecrypt-secret-synapse-signing-key"
   )
 } %}
-{% set service_migration_triggers = {
-  "caddy": ("telecrypt-migrate-quadlet-telecrypt-caddy-container",),
-  "cashier": ("telecrypt-migrate-quadlet-telecrypt-cashier-container",),
-  "lk-jwt": ("telecrypt-migrate-quadlet-telecrypt-lk-jwt-container",),
-  "mas": ("telecrypt-migrate-quadlet-telecrypt-mas-container",),
-  "plan": ("telecrypt-migrate-quadlet-telecrypt-plan-container",),
-  "registration": ("telecrypt-migrate-quadlet-telecrypt-registration-container",),
-  "synapse": ("telecrypt-migrate-quadlet-telecrypt-synapse-container",)
-} %}
-
 {% for service, triggers in service_triggers.items() %}
 telecrypt-refresh-{{ service }}:
   cmd.run:
@@ -222,9 +216,7 @@ telecrypt-refresh-{{ service }}:
 {% for trigger in triggers %}
       - file: {{ trigger }}
 {% endfor %}
-{% for trigger in service_migration_triggers[service] %}
-      - cmd: {{ trigger }}
-{% endfor %}
+      - cmd: telecrypt-migrate-quadlet-telecrypt-{{ service }}-container
     - require:
       - file: telecrypt-activation-pending
       - cmd: telecrypt-clear-pod-refresh-marker
@@ -232,9 +224,7 @@ telecrypt-refresh-{{ service }}:
 {% for trigger in triggers %}
       - file: {{ trigger }}
 {% endfor %}
-{% for trigger in service_migration_triggers[service] %}
-      - cmd: {{ trigger }}
-{% endfor %}
+      - cmd: telecrypt-migrate-quadlet-telecrypt-{{ service }}-container
 {% endfor %}
 
 telecrypt-refresh-janitor-timer:
@@ -282,7 +272,7 @@ telecrypt-activation-failed:
         t=p+".tmp";
         f=open(t, "w", encoding="utf-8");
         json.dump(d, f, sort_keys=True); f.write("\n"); f.close();
-        os.chmod(t, 0o600); os.replace(t, p)' {{ data_dir }}/deploy-state/activation.json {{ tag }}
+        os.chmod(t, 0o600); os.replace(t, p)' {{ activation_receipt_path }} {{ tag }}
     - runas: ubuntu
     - env: {{ env }}
     - shell: /bin/bash
@@ -298,14 +288,11 @@ telecrypt-activation:
         t=p+".tmp";
         f=open(t, "w", encoding="utf-8");
         json.dump(d, f, sort_keys=True); f.write("\n"); f.close();
-        os.chmod(t, 0o600); os.replace(t, p)' {{ data_dir }}/deploy-state/activation.json
+        os.chmod(t, 0o600); os.replace(t, p)' {{ activation_receipt_path }}
     - runas: ubuntu
     - env: {{ env }}
     - shell: /bin/bash
     - unless: >-
-        /usr/bin/python3 -c 'import json,sys;
-        d=json.load(open(sys.argv[1], encoding="utf-8"));
-        sys.exit(0 if d.get("status") == "succeeded" and d.get("release") == sys.argv[2] else 1)'
-        {{ data_dir }}/deploy-state/activation.json {{ tag }}
+        {{ activation_receipt_check(activation_receipt_path, activation_success_receipt) }}
     - require:
       - cmd: telecrypt-start-stack
