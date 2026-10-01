@@ -67,7 +67,8 @@ HAProxy passes TCP through to the VM's private port 8443 and supplies the origin
 address using PROXY protocol. Caddy terminates TLS inside the shared pasta pod, and routes
 requests directly to the application loopback listeners. Set `server.ingress_bind_address`
 to the VM's private address and `server.ingress_proxy_cidr` to the actual HAProxy peer's CIDR.
-Caddy requires PROXY protocol from that peer; port 8080 is no longer published.
+Caddy trusts PROXY headers from that peer and rejects headers from other peers. Direct TLS
+without a PROXY header remains possible on the private listener; port 8080 is no longer published.
 
 Caddy renews certificates with the TLS-ALPN challenge through public port 443. HTTP/3 and
 HTTP redirects are disabled because the external ingress forwards only TLS over TCP.

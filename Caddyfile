@@ -10,7 +10,7 @@
 		listener_wrappers {
 			proxy_protocol {
 				allow {$INGRESS_PROXY_CIDR}
-				fallback_policy require
+				fallback_policy reject
 			}
 			tls
 		}
