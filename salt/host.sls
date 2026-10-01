@@ -1,5 +1,4 @@
 {% set operator = pillar["telecrypt"]["operator"] %}
-{% set salt_config = pillar["telecrypt"].get("salt", {}) %}
 
 telecrypt-operator:
   user.present:
@@ -16,7 +15,6 @@ telecrypt-runtime-packages:
       - openssh-server
       - passt
       - podman
-      - salt-minion
       - uidmap
 
 telecrypt-cloud-init-hostname:
@@ -88,31 +86,20 @@ telecrypt-linger:
     - require:
       - user: telecrypt-operator
 
-telecrypt-salt-minion-config:
-  file.managed:
-    - name: /etc/salt/minion.d/telecrypt.conf
-    - contents: |
-        master: {{ salt_config.get("master", "192.0.2.20") }}
-        id: {{ salt_config.get("minion_id", pillar["telecrypt"]["server"]["name"]) }}
-        master_finger: {{ salt_config.get("master_finger", "REPLACE_WITH_SALT_MASTER_FINGERPRINT") }}
-        file_client: remote
-        pillarenv: base
-        saltenv: base
-    - user: root
-    - group: root
-    - mode: '0644'
-    - show_changes: false
-    - require:
-      - pkg: telecrypt-runtime-packages
-
-telecrypt-salt-minion:
-  service.running:
+# Salt SSH executes over the owner's provisioned SSH access; no daemon is needed.
+telecrypt-salt-minion-retired:
+  service.dead:
     - name: salt-minion
-    - enable: true
-    - watch:
-      - file: telecrypt-salt-minion-config
+    - enable: false
+    - onlyif:
+      - fun: service.available
+        name: salt-minion
+
+telecrypt-salt-minion-config-retired:
+  file.absent:
+    - name: /etc/salt/minion.d/telecrypt.conf
     - require:
-      - pkg: telecrypt-runtime-packages
+      - service: telecrypt-salt-minion-retired
 
 telecrypt-sshd-runtime-directory:
   file.directory:

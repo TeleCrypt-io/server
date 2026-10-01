@@ -27,6 +27,17 @@ telecrypt-runtime-directory:
     - require:
       - file: telecrypt-data-directory
 
+# Retain the certificate store created by the former standalone TLS ingress.
+telecrypt-caddy-data-directory:
+  file.directory:
+    - name: {{ runtime_dir }}/tls-ingress/data
+    - user: {{ operator["subuid_start"]|int + 65531 }}
+    - group: {{ operator["subgid_start"]|int + 65531 }}
+    - mode: '0700'
+    - makedirs: true
+    - require:
+      - file: telecrypt-runtime-directory
+
 telecrypt-secrets-directory:
   file.directory:
     - name: {{ secrets_dir }}
@@ -82,6 +93,7 @@ telecrypt-deployment-environment:
         SERVER_NAME={{ server["name"] }}
         BILLING_ENVIRONMENT={{ server["billing_environment"] }}
         INGRESS_BIND_ADDRESS={{ server["ingress_bind_address"] }}
+        INGRESS_PROXY_CIDR={{ server["ingress_proxy_cidr"] }}
     - user: ubuntu
     - group: ubuntu
     - mode: '0600'

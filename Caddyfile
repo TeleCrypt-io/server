@@ -1,10 +1,23 @@
-# Plain HTTP reverse proxy inside the private Podman pod.
-# TLS is terminated by the upstream HAProxy; this listener is never public.
+# HAProxy passes TLS and the original client address to the shared pasta pod.
 {
-	auto_https off
+	https_port 8443
+	auto_https disable_redirects
+	cert_issuer acme {
+		disable_http_challenge
+	}
+	servers :8443 {
+		protocols h1 h2
+		listener_wrappers {
+			proxy_protocol {
+				allow {$INGRESS_PROXY_CIDR}
+				fallback_policy require
+			}
+			tls
+		}
+	}
 }
 
-http://{$SERVER_NAME}:8080 {
+{$SERVER_NAME} {
 	@well_known_client {
 		method GET
 		path /.well-known/matrix/client
@@ -36,7 +49,7 @@ http://{$SERVER_NAME}:8080 {
 	}
 }
 
-http://backend.{$SERVER_NAME}:8080 {
+backend.{$SERVER_NAME} {
 	@mas_compat path_regexp ^/_matrix/client/[^/]+/(logout|refresh)/?$
 	@synapse path /_matrix/*
 	@registration path /redpill

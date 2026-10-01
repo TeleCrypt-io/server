@@ -1,5 +1,5 @@
 {#
-  Activate one release after the master has selected its file root. The image
+  Activate one release after Harness has selected its file root. The image
   manifest is read from Salt's file server and is never resolved on the VM.
 #}
 {% set vars = pillar["telecrypt"] %}
@@ -136,6 +136,7 @@ telecrypt-pod-refresh:
       - file: telecrypt-unit-telecrypt-pod-service
       - file: telecrypt-unit-telecrypt-target
       - file: telecrypt-deployment-environment
+      - file: telecrypt-caddy-data-directory
 
 telecrypt-pod-recover:
   cmd.run:
@@ -259,6 +260,7 @@ telecrypt-start-stack:
 {% for key in image_keys %}
       - file: telecrypt-image-env-{{ key|lower|replace("_", "-") }}
 {% endfor %}
+      - file: telecrypt-caddy-data-directory
       - file: telecrypt-secret-janitor-secrets-env
       - file: telecrypt-deploy-state-directory
 

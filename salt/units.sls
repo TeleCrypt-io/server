@@ -87,6 +87,25 @@ telecrypt-quadlet-{{ name|replace(".", "-") }}:
       - cmd: telecrypt-migrate-quadlet-{{ name|replace(".", "-") }}
 {% endfor %}
 
+# Release port 8443 before the shared pod takes over TLS. Keep its data store.
+telecrypt-retire-tls-ingress:
+  cmd.run:
+    - name: systemctl --user stop telecrypt-tls-ingress.service && podman rm --ignore --force telecrypt-tls-ingress
+    - runas: ubuntu
+    - env:
+        HOME: /home/ubuntu
+        XDG_RUNTIME_DIR: /run/user/{{ salt["user.info"]("ubuntu").get("uid", 1000)|int }}
+        DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/{{ salt["user.info"]("ubuntu").get("uid", 1000)|int }}/bus
+    - onlyif: test -f {{ quadlet_dir }}/telecrypt-tls-ingress.container
+    - require:
+      - file: telecrypt-quadlet-telecrypt-caddy-container
+
+telecrypt-retired-tls-ingress-quadlet:
+  file.absent:
+    - name: {{ quadlet_dir }}/telecrypt-tls-ingress.container
+    - require:
+      - cmd: telecrypt-retire-tls-ingress
+
 telecrypt-user-daemon-reload:
   cmd.run:
     - name: systemctl --user daemon-reload
@@ -98,6 +117,7 @@ telecrypt-user-daemon-reload:
     - require:
       - file: telecrypt-user-unit-directory
       - file: telecrypt-quadlet-directory
+      - file: telecrypt-retired-tls-ingress-quadlet
 {% for name in service_units %}
       - file: telecrypt-unit-{{ name|replace(".", "-") }}
 {% endfor %}

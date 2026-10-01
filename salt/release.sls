@@ -1,5 +1,5 @@
 {#
-  The master exposes one selected immutable server release as the Salt file root.
+  Harness exposes one selected immutable server release as the Salt file root.
   The release manifest is placed beside the extracted release as
   server-state-images.json before this state is applied. It is the sole image
   selection input; no image tag is resolved on the VM.

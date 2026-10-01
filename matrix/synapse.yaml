@@ -17,7 +17,7 @@ room_prejoin_state:
     - [org.matrix.msc3088.purpose, org.matrix.msc3089.data_tree]
     - m.space.parent
 
-# Plain HTTP; TLS terminated upstream → Caddy → here. x_forwarded trusts X-Forwarded-* headers.
+# Plain HTTP inside the pod; Caddy terminates TLS. x_forwarded trusts X-Forwarded-* headers.
 listeners:
   - port: 8008
     tls: false
