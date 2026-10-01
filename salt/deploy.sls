@@ -16,8 +16,7 @@
   "XDG_RUNTIME_DIR": "/run/user/" ~ uid|string,
   "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/" ~ uid|string ~ "/bus"
 } %}
-{% set manifest_text = salt["cp.get_file_str"]("salt://server-state-images.json") %}
-{% set manifest = salt["slsutil.deserialize"]("json", manifest_text) %}
+{% import_json "server-state-images.json" as manifest %}
 {% if manifest.get("schema_version") != 1 %}
   {{ salt["test.raise_exception"]("ValueError", "server-state-images.json schema_version must be 1") }}
 {% endif %}
