@@ -2,7 +2,7 @@
 
 This repository is the immutable source for a TeleCrypt VM release. It contains the Caddy,
 Matrix, systemd/Quadlet and Salt files needed to prepare a host and run one exact image manifest.
-Credentials and populated environment files stay outside Git in Harness's private Pillar.
+Credentials and populated environment files stay outside Git in Harness's private secret files.
 
 ## Salt deployment
 
@@ -38,9 +38,11 @@ host keys, and add their private roster entries on Harness. Salt does not replac
 removes its obsolete TeleCrypt configuration.
 
 Store each target's exact secret files under
-`~/salt_secrets/hosts/<roster-id>/secrets/`. Salt's built-in
-`file_tree` Pillar exposes only the matching target's files as Pillar values, and `salt.deploy`
-writes them to `/home/ubuntu/salt_config/secrets/` with their required private modes. Cashier's
+`~/salt_secrets/hosts/<roster-id>/secrets/`, with `~/salt_secrets` as a private Salt file root.
+The runtime states select `salt://hosts/<roster-id>/secrets/<name>` using the target's Salt ID.
+Salt SSH packages those referenced files and `salt.deploy` copies their original bytes to
+`/home/ubuntu/salt_config/secrets/` with the required private modes. Secrets are not templated
+or embedded in Pillar. Cashier's
 existing private configuration remains in `cashier.secrets.env`. Three separate files carry the
 Cashier service credentials: `cashier-plan-token.env` contains only `CASHIER_PLAN_TOKEN`,
 `cashier-synapse-token.env` only `CASHIER_SYNAPSE_TOKEN`, and `cashier-janitor-token.env` only

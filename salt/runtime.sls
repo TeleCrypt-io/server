@@ -203,7 +203,7 @@ telecrypt-mas-environment:
 telecrypt-secret-{{ name|replace(".", "-")|replace("_", "-") }}:
   file.managed:
     - name: {{ secrets_dir }}/{{ name }}
-    - contents_pillar: secrets:{{ name }}
+    - source: salt://hosts/{{ grains["id"] }}/secrets/{{ name }}
     - user: ubuntu
     - group: ubuntu
     - mode: '{{ mode }}'
