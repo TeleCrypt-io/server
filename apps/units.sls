@@ -45,6 +45,7 @@ apps-pod-quiescent:
       - file: apps-pod-quadlet
     - require:
       - service: salt-user-manager
+      - user_service: apps-janitor-quiescent
 
 apps-pod-quadlet:
   file.managed:
@@ -74,6 +75,9 @@ apps-{{ name }}-quiescent:
 {% endfor %}
     - require:
       - service: salt-user-manager
+{% if name in ('cashier', 'plan') %}
+      - user_service: apps-janitor-quiescent
+{% endif %}
 
 apps-{{ name }}-quadlet:
   file.managed:
@@ -85,7 +89,6 @@ apps-{{ name }}-quadlet:
     - mode: '0644'
     - require:
       - file: apps-quadlet-directory
-      - file: apps-pod-quadlet
 {% endfor %}
 
 apps-janitor-quiescent:
@@ -100,6 +103,7 @@ apps-janitor-quiescent:
 {% endfor %}
     - require:
       - service: salt-user-manager
+      - user_service: apps-janitor-timer-quiescent
 
 apps-janitor-quadlet:
   file.managed:
@@ -111,7 +115,6 @@ apps-janitor-quadlet:
     - mode: '0644'
     - require:
       - file: apps-quadlet-directory
-      - file: apps-pod-quadlet
 
 apps-janitor-timer-quiescent:
   user_service.dead:
