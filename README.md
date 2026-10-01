@@ -8,7 +8,7 @@ The private target Pillar supplies `site.server_name`, `site.billing_environment
 and merge the `apps` entry from this repository’s example `top.sls` into the existing private top.
 The shared `shared/stage.sls` owns site identity and the payment-webhook path once for both roles. Keep credentials in the per-host input files below; do not merge them into one environment file.
 
-The image pins in `pillar/apps.sls` identify the currently released app baseline. Replace them with the new cross-host release images before applying the fresh-host app highstate.
+The image pins in `pillar/apps.sls` select published releases that support the private cross-host service endpoints.
 
 Salt reads these files from `hosts/<target>/secrets/`:
 
