@@ -1,0 +1,36 @@
+{% set network = pillar['network'] %}
+global
+    log stdout format raw local0
+    user haproxy
+    group haproxy
+
+defaults
+    log global
+    mode http
+    option httplog
+    timeout connect 5s
+    timeout client 1m
+    timeout server 1m
+
+frontend applications_private
+    bind {{ network['private_address'] }}:8080
+    http-request deny unless { src {{ network['matrix_address'] }} }
+    # Matrix ingress overwrites forwarded headers; no other peer may supply them.
+    use_backend registration if { path -i /redpill }
+    use_backend plan if { path_beg /plan/ }
+    use_backend cashier if { path -i {{ pillar['ingress']['dodo_webhook_path'] }} }
+    use_backend cashier if { path -i /internal/cashier/file_upload_webhook /internal/cashier/file_delete_webhook }
+    default_backend not_found
+
+backend registration
+    server registration 127.0.0.1:9009 check
+
+backend plan
+    server plan 127.0.0.1:9012 check
+
+backend cashier
+    server cashier 127.0.0.1:9011 check
+
+backend not_found
+    http-request return status 418
+

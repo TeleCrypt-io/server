@@ -1,0 +1,28 @@
+[Unit]
+Description=TeleCrypt Janitor one-shot
+Requires=apps-pod.service cashier.service plan.service
+After=apps-pod.service cashier.service plan.service
+
+[Container]
+LogDriver=journald
+ContainerName=janitor
+Image={{ pillar['versions']['images']['controlplane'] }}
+Pod=apps.pod
+StartWithPod=false
+NoNewPrivileges=true
+EnvironmentFile=/home/ubuntu/salt_config/secrets/janitor.secrets.env
+EnvironmentFile=/home/ubuntu/salt_config/secrets/cashier-janitor-token.env
+Pull=missing
+User=991:991
+ReadOnly=true
+DropCapability=ALL
+Environment=SERVER_NAME={{ pillar['site']['server_name'] }}
+Environment=BILLING_ENVIRONMENT={{ pillar['site']['billing_environment'] }}
+Environment=MAS_ADMIN_URL={{ pillar['endpoints']['mas_admin_url'] }}
+Environment=SYNAPSE_ADMIN_URL={{ pillar['endpoints']['synapse_admin_url'] }}
+Exec=/janitor
+
+[Service]
+Type=oneshot
+TimeoutStartSec=15min
+Restart=no

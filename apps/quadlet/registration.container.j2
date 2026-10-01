@@ -1,0 +1,30 @@
+[Unit]
+Description=TeleCrypt Registration
+
+[Container]
+LogDriver=journald
+ContainerName=registration
+Image={{ pillar['versions']['images']['controlplane'] }}
+Pod=apps.pod
+StartWithPod=false
+NoNewPrivileges=true
+Notify=healthy
+Pull=missing
+User=991:991
+ReadOnly=true
+DropCapability=ALL
+Environment=SERVER_NAME={{ pillar['site']['server_name'] }}
+Exec=/registration
+HealthCmd=["/registration","healthcheck"]
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=30s
+
+[Service]
+TimeoutStartSec=900
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

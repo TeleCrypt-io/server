@@ -1,29 +1,11 @@
-# Private secrets and runtime files stay outside the repository.
-
-# Private environment files
-.env
+# Target-specific private Pillar and application credentials stay outside source control.
 *.env
-
-# Host-local Salt pillar
-salt/pillar/telecrypt.sls
-
-# Local secret data
 secrets/
+pillar/hosts/
 
-# Key / identity material (must never leave the host)
-*.key
-*.pem
-
-# Persistent data (bind-mounted from the host; not part of the repo)
-persistent_data/
-db/
-media_store/
-
-# Logs / runtime
+# Runtime and editor output
 *.log
 *.pid
-
-# Python test artifacts (the Synapse policy-module tests)
 __pycache__/
 *.pyc
 .pytest_cache/

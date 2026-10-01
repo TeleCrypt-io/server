@@ -1,0 +1,37 @@
+[Unit]
+Description=TeleCrypt Cashier
+
+[Container]
+LogDriver=journald
+ContainerName=cashier
+Image={{ pillar['versions']['images']['cashier'] }}
+Pod=apps.pod
+StartWithPod=false
+NoNewPrivileges=true
+EnvironmentFile=/home/ubuntu/salt_config/secrets/cashier.secrets.env
+EnvironmentFile=/home/ubuntu/salt_config/secrets/cashier-plan-token.env
+EnvironmentFile=/home/ubuntu/salt_config/secrets/cashier-synapse-token.env
+EnvironmentFile=/home/ubuntu/salt_config/secrets/cashier-janitor-token.env
+EnvironmentFile=/home/ubuntu/salt_config/secrets/cashier-dodo-webhook-secret.env
+Notify=healthy
+Pull=missing
+User=991:991
+ReadOnly=true
+DropCapability=ALL
+Environment=SERVER_NAME={{ pillar['site']['server_name'] }}
+Environment=BILLING_ENVIRONMENT={{ pillar['site']['billing_environment'] }}
+Environment=SYNAPSE_ADMIN_URL={{ pillar['endpoints']['synapse_admin_url'] }}
+Environment=DODO_WEBHOOK_PATH={{ pillar['ingress']['dodo_webhook_path'] }}
+HealthCmd=["/cashier","healthcheck"]
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=30s
+
+[Service]
+TimeoutStartSec=900
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

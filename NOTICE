@@ -1,0 +1,5 @@
+This deployment adapts the resource-state approach of PotemkinCo/matrix-salt.
+The shared configuration is retained through the common Git submodule, including
+its upstream attribution in common/NOTICE and Apache-2.0 license in
+common/LICENSES/Apache-2.0.txt. TeleCrypt application configuration uses the
+license in LICENSE; upstream notices and licenses remain applicable to reused code.

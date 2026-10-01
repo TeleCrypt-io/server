@@ -1,0 +1,36 @@
+[Unit]
+Description=TeleCrypt Plan
+After=cashier.service
+Requires=cashier.service
+
+[Container]
+LogDriver=journald
+ContainerName=plan
+Image={{ pillar['versions']['images']['controlplane'] }}
+Pod=apps.pod
+StartWithPod=false
+NoNewPrivileges=true
+EnvironmentFile=/home/ubuntu/salt_config/secrets/plan.secrets.env
+EnvironmentFile=/home/ubuntu/salt_config/secrets/cashier-plan-token.env
+Notify=healthy
+Pull=missing
+User=991:991
+ReadOnly=true
+DropCapability=ALL
+Environment=SERVER_NAME={{ pillar['site']['server_name'] }}
+Environment=BILLING_ENVIRONMENT={{ pillar['site']['billing_environment'] }}
+Environment=MAS_INTERNAL_URL={{ pillar['endpoints']['mas_internal_url'] }}
+Exec=/plan
+HealthCmd=["/plan","healthcheck"]
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=30s
+
+[Service]
+TimeoutStartSec=900
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
