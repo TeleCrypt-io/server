@@ -4,6 +4,9 @@ telecrypt:
     billing_environment: test
     ingress_bind_address: 192.0.2.28
     ingress_proxy_cidr: 192.0.2.1/32
+  livekit:
+    public_ip: 192.0.2.1
+    api_key: telecrypt-stage
   release:
     tag: server-state-REPLACE_WITH_RELEASE_TAG
   operator:

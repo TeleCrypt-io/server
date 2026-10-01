@@ -24,9 +24,9 @@
   {{ salt["test.raise_exception"]("ValueError", "server-state-images.json does not match the selected release tag") }}
 {% endif %}
 {% set images = manifest.get("images", {}) %}
-{% set image_keys = ("CADDY_IMAGE", "SYNAPSE_IMAGE", "MAS_IMAGE", "CONTROLPLANE_IMAGE", "CASHIER_IMAGE", "LK_JWT_IMAGE") %}
+{% set image_keys = ("CADDY_IMAGE", "SYNAPSE_IMAGE", "MAS_IMAGE", "CONTROLPLANE_IMAGE", "CASHIER_IMAGE", "LK_JWT_IMAGE", "LIVEKIT_IMAGE") %}
 {% if images.keys()|list|sort != image_keys|list|sort %}
-  {{ salt["test.raise_exception"]("ValueError", "server-state-images.json must contain exactly the six application images") }}
+  {{ salt["test.raise_exception"]("ValueError", "server-state-images.json must contain exactly the selected application images") }}
 {% endif %}
 {% for key in image_keys %}
   {% if images[key].get("image", "") is not string or images[key].get("digest", "") is not string or not images[key]["digest"].startswith("sha256:") %}
@@ -171,10 +171,16 @@ telecrypt-pod-recover:
     "telecrypt-secret-dodo-webhook-env",
     "telecrypt-secret-cashier-dodo-webhook-secret-env"
   ),
+  "livekit": (
+    "telecrypt-quadlet-telecrypt-livekit-container",
+    "telecrypt-image-env-livekit-image",
+    "telecrypt-livekit-config",
+    "telecrypt-secret-livekit-keys"
+  ),
   "lk-jwt": (
     "telecrypt-quadlet-telecrypt-lk-jwt-container",
     "telecrypt-image-env-lk-jwt-image",
-    "telecrypt-secret-livekit-secrets-env"
+    "telecrypt-secret-livekit-keys"
   ),
   "mas": (
     "telecrypt-quadlet-telecrypt-mas-container",
@@ -244,7 +250,7 @@ telecrypt-start-stack:
         /usr/bin/systemctl --user start telecrypt.target telecrypt-pod.service
         telecrypt-caddy.service telecrypt-mas.service telecrypt-synapse.service
         telecrypt-registration.service telecrypt-plan.service telecrypt-cashier.service
-        telecrypt-lk-jwt.service
+        telecrypt-lk-jwt.service telecrypt-livekit.service
     - runas: ubuntu
     - env: {{ env }}
     - require:

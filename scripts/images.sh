@@ -8,4 +8,5 @@ MAS_IMAGE=ghcr.io/element-hq/matrix-authentication-service:1.24.0
 CONTROLPLANE_IMAGE=ghcr.io/telecrypt-io/controlplane:${2:?Controlplane tag required}
 CASHIER_IMAGE=ghcr.io/telecrypt-io/telecrypt-cashier:${3:?Cashier tag required}
 LK_JWT_IMAGE=ghcr.io/element-hq/lk-jwt-service:0.7.0
-IMAGE_KEYS=(CADDY_IMAGE SYNAPSE_IMAGE MAS_IMAGE CONTROLPLANE_IMAGE CASHIER_IMAGE LK_JWT_IMAGE)
+LIVEKIT_IMAGE=docker.io/livekit/livekit-server:v1.13.7
+IMAGE_KEYS=(CADDY_IMAGE SYNAPSE_IMAGE MAS_IMAGE CONTROLPLANE_IMAGE CASHIER_IMAGE LK_JWT_IMAGE LIVEKIT_IMAGE)

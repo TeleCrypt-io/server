@@ -1,0 +1,15 @@
+port: 7880
+bind_addresses:
+  - 0.0.0.0
+rtc:
+  tcp_port: 0
+  udp_port: 443
+  use_external_ip: false
+  node_ip: {{ pillar["telecrypt"]["livekit"]["public_ip"] | tojson }}
+room:
+  auto_create: false
+key_file: /etc/livekit/keys.yaml
+webhook:
+  api_key: {{ pillar["telecrypt"]["livekit"]["api_key"] | tojson }}
+  urls:
+    - http://127.0.0.1:9013/sfu_webhook

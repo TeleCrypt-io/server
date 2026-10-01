@@ -8,6 +8,7 @@ Wants=telecrypt-registration.service
 Wants=telecrypt-plan.service
 Wants=telecrypt-cashier.service
 Wants=telecrypt-lk-jwt.service
+Wants=telecrypt-livekit.service
 After=telecrypt-pod.service
 
 [Install]

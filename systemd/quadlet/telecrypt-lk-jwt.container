@@ -9,7 +9,9 @@ ContainerName=telecrypt-lk-jwt
 Image=${LK_JWT_IMAGE}
 PodmanArgs=--pod=telecrypt
 PodmanArgs=--security-opt=no-new-privileges
-PodmanArgs=--env-file=${TELECRYPT_DATA_DIR}/secrets/livekit.secrets.env
+Volume=/home/ubuntu/salt_config/secrets/livekit.keys.yaml:/etc/livekit/keys.yaml:ro
+Environment=LIVEKIT_KEY_FILE=/etc/livekit/keys.yaml
+Environment=LIVEKIT_URL=wss://backend.${SERVER_NAME}/livekit
 PodmanArgs=--sdnotify=healthy
 Pull=never
 User=991:991

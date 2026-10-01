@@ -195,7 +195,6 @@ telecrypt-mas-environment:
   ("cashier-janitor-token.env", "0600"),
   ("cashier-dodo-webhook-secret.env", "0600"),
   ("dodo-webhook.env", "0600"),
-  ("livekit.secrets.env", "0600"),
   ("synapse.secrets.json", "0444"),
   ("synapse_signing.key", "0444"),
   ("mas.secrets.json", "0444")
@@ -211,3 +210,33 @@ telecrypt-secret-{{ name|replace(".", "-")|replace("_", "-") }}:
     - require:
       - file: telecrypt-secrets-directory
 {% endfor %}
+
+telecrypt-livekit-config:
+  file.managed:
+    - name: {{ runtime_dir }}/livekit.yaml
+    - source: {{ release_dir }}/livekit.yaml.j2
+    - template: jinja
+    - user: ubuntu
+    - group: ubuntu
+    - mode: '0644'
+    - require:
+      - file: telecrypt-runtime-directory
+      - file: telecrypt-current-release
+
+# Both SFU and JWT run as container UID 991; no other container mounts this file.
+telecrypt-secret-livekit-keys:
+  file.managed:
+    - name: {{ secrets_dir }}/livekit.keys.yaml
+    - source: salt://hosts/{{ grains["id"] }}/secrets/livekit.keys.yaml
+    - user: {{ operator["subuid_start"]|int + 990 }}
+    - group: {{ operator["subgid_start"]|int + 990 }}
+    - mode: '0400'
+    - show_changes: false
+    - require:
+      - file: telecrypt-secrets-directory
+
+telecrypt-retired-livekit-environment:
+  file.absent:
+    - name: {{ secrets_dir }}/livekit.secrets.env
+    - require:
+      - file: telecrypt-secret-livekit-keys

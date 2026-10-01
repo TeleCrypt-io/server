@@ -73,6 +73,9 @@ backend.{$SERVER_NAME} {
 	handle @cashier {
 		reverse_proxy 127.0.0.1:9011
 	}
+	handle_path /livekit/* {
+		reverse_proxy 127.0.0.1:7880
+	}
 	handle @lk_jwt {
 		reverse_proxy 127.0.0.1:9013
 	}

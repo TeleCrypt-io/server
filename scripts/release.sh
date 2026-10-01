@@ -43,17 +43,17 @@ if [[ -n $reuse_tag ]]; then
     --arg commit "$source_commit" --argjson keys "$expected_keys" \
     '.schema_version == 1 and .server_state_tag == $tag
      and .annotated_tag_sha == $annotated and .source_commit == $commit
-     and (.images | keys) == $keys
+     and ((.images | keys) - $keys | length) == 0
      and all(.images[]; (.image | type == "string")
        and (.digest | test("^sha256:[0-9a-f]{64}$")))' <<< "$manifest" >/dev/null || {
       echo "Invalid source manifest or tag identity: $reuse_tag" >&2
       exit 1
     }
   images=$(jq .images <<< "$manifest")
-  printf 'Reusing exact image manifest from %s\n' "$reuse_tag" >&2
+  printf 'Reusing existing image entries from %s\n' "$reuse_tag" >&2
 fi
 for key in "${IMAGE_KEYS[@]}"; do
-  if [[ -n $reuse_tag ]]; then
+  if [[ -n $reuse_tag ]] && jq -e --arg key "$key" 'has($key)' <<< "$images" >/dev/null; then
     image=$(jq -r --arg key "$key" '.[$key].image' <<< "$images")
     digest=$(jq -r --arg key "$key" '.[$key].digest' <<< "$images")
   else

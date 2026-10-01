@@ -22,7 +22,7 @@ systemd-analyze verify systemd/telecrypt-pod.service systemd/telecrypt.target
 test "$(salt-call --version | awk '{print $2}')" = "$(<salt/version)"
 mkdir -p "$work_dir/root" "$work_dir/pillar" "$work_dir/config"
 # Salt renders the working files, including uncommitted edits, in an isolated file root.
-cp -a salt systemd "$work_dir/root/"
+cp -a salt systemd livekit.yaml.j2 "$work_dir/root/"
 cp salt/pillar/top.sls "$work_dir/pillar/top.sls"
 cp salt/pillar/telecrypt.sls.example "$work_dir/pillar/telecrypt.sls"
 cat > "$work_dir/config/minion" <<CONFIG
@@ -47,3 +47,5 @@ for state in salt.host salt.services salt.release salt.deploy; do
     state.show_sls "$state" > "$work_dir/${state//./-}-render"
 done
 ./tests/test_activation_receipt.py "$work_dir/salt-deploy-render"
+
+python3 tests/test_livekit.py "$LIVEKIT_IMAGE"

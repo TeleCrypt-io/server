@@ -76,24 +76,59 @@ Certificate and ACME data persist at `/home/ubuntu/salt_config/runtime/tls-ingre
 keep this directory across releases. Salt retires the former standalone TLS ingress container
 before the shared pod binds port 8443, retaining its existing certificates.
 
+## Stage LiveKit
+
+The shared Stage pod includes the LiveKit SFU and the existing LiveKit JWT service.
+Signaling uses `wss://backend.stage.telecrypt.io/livekit`; Caddy removes `/livekit` before
+proxying to the SFU's private port 7880. JWT stays at the existing backend endpoints.
+No additional DNS name is required. Production remains on its existing release.
+
+Only public TCP and UDP port 443 are needed: existing TLS passthrough handles signaling;
+the owner must forward public UDP 443 directly to the Stage VM's private UDP port 8444.
+The pod maps that to the SFU's UDP 443 so ICE advertises the same port clients can reach.
+Media cannot pass through an HTTP reverse proxy. ICE/TCP is disabled; networks blocking
+UDP need a separately agreed TURN/TLS deployment. No TURN server is configured here.
+
+Set `telecrypt.livekit.public_ip` in the Stage Pillar to the edge's public IPv4 address,
+and `telecrypt.livekit.api_key` to the nonsecret identifier of the signing key.
+Keep a single `livekit.keys.yaml` in the target's private Salt secrets directory:
+
+```yaml
+telecrypt-stage: REPLACE_WITH_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
+```
+
+Use exactly one plain, unquoted `key: secret` line with a hexadecimal secret; JWT reads
+this simple format. The map key must match `livekit.api_key`. Both SFU and JWT read this same file, installed
+mode 0400 owned by their mapped container UID 991; neither receives Matrix administrator
+credentials. Salt removes the old target `livekit.secrets.env` after installing the key file.
+Room auto-creation is disabled, so the JWT service's homeserver restriction controls room
+creation. Signed participant webhooks go directly to JWT over shared-pod loopback.
+The pod's low UDP port needs `NET_BIND_SERVICE` inside the container; the host only binds
+unprivileged port 8444. Verify actual two-participant media on Stage after edge forwarding.
+
 ## Manual release
 
 Run releases from an operator checkout on Harness. GitHub Actions does not assemble releases.
 Install the release tools once: Podman 4.9.3 (matching Stage), Salt at `salt/version`,
-`skopeo`, `gh`, `jq`, OpenSSL, and Python 3. Authenticate `gh` for this repository and
+`skopeo`, `gh`, `jq`, OpenSSL, and Python 3 with Jinja2. Authenticate `gh` for this repository and
 `skopeo login ghcr.io` when private image access requires it; keep credentials outside Git.
 
 Run `./scripts/check.sh` to validate Caddy and systemd/Quadlet, render the Salt states with
-an isolated example Pillar, and execute activation receipt transition tests. This reuses the
-local Caddy image and installed tools; it does not install packages or alter Harness's
+an isolated example Pillar, and execute activation receipt transition tests plus SFU startup and authenticated room API
+checks. This reuses the
+local Caddy and LiveKit images and installed tools; it does not install packages or alter Harness's
 configuration. These checks supplement the required real Stage end-to-end acceptance.
 
 Select exact published Synapse, Controlplane and Cashier image tags. To check the selection
-and resolve all six image digests without publishing:
+and resolve all selected image digests without publishing:
 
 ```sh
 ./scripts/release.sh --check 1.159-tc34 0.5.54 0.4.39
 ```
+
+For a configuration-only change or a newly added public image, `--reuse-images SERVER_STATE_TAG`
+reuses existing entries from that verified immutable release and resolves newly added image keys
+from the selected registry tags. Existing private images do not need a new registry lookup.
 
 After committing and pushing the source, publish that same selection from a clean checkout:
 

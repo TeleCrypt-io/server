@@ -27,6 +27,16 @@ telecrypt-release-caddyfile:
     - require:
       - file: telecrypt-release-directory
 
+telecrypt-release-livekit-config:
+  file.managed:
+    - name: {{ release_dir }}/livekit.yaml.j2
+    - source: salt://livekit.yaml.j2
+    - user: ubuntu
+    - group: ubuntu
+    - mode: '0644'
+    - require:
+      - file: telecrypt-release-directory
+
 telecrypt-release-matrix:
   file.recurse:
     - name: {{ release_dir }}/matrix
@@ -83,6 +93,7 @@ telecrypt-current-release:
     - atomic: true
     - require:
       - file: telecrypt-release-caddyfile
+      - file: telecrypt-release-livekit-config
       - file: telecrypt-release-matrix
       - file: telecrypt-release-salt
       - file: telecrypt-release-systemd

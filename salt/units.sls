@@ -13,6 +13,7 @@
   "telecrypt-caddy.container",
   "telecrypt-cashier.container",
   "telecrypt-lk-jwt.container",
+  "telecrypt-livekit.container",
   "telecrypt-mas.container",
   "telecrypt-plan.container",
   "telecrypt-registration.container",
