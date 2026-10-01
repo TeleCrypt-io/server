@@ -28,6 +28,19 @@ apps-secrets-directory:
     - require:
       - file: apps-data-directory
 
+# Podman reads its standard host auth file when Quadlet pulls the private Cashier image.
+# Keep this credential on the host; it is not mounted into application containers.
+apps-registry-auth:
+  file.managed:
+    - name: /home/ubuntu/.config/containers/auth.json
+    - source: salt://hosts/{{ grains['id'] }}/secrets/ghcr.auth.json
+    - user: ubuntu
+    - group: ubuntu
+    - mode: '0600'
+    - show_changes: false
+    - require:
+      - file: salt-operator-containers-directory
+
 {% for name in secret_names %}
 apps-secret-{{ name|replace('.', '-') }}:
   file.managed:

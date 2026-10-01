@@ -10,6 +10,11 @@ The shared `shared/stage.sls` owns site identity and the payment-webhook path on
 
 The image pins in `pillar/apps.sls` select published releases that support the private cross-host service endpoints.
 
+Cashier's image is private. Supply a Podman-format `hosts/<target>/secrets/ghcr.auth.json`
+in the private file root with GHCR package-read access. Salt installs it as the operator's
+0600 `~/.config/containers/auth.json` before Cashier starts; application containers never
+receive the registry credential. Reuse the existing deployment credential where available.
+
 Salt reads these files from `hosts/<target>/secrets/`:
 
 - `cashier.secrets.env`

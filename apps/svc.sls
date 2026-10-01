@@ -25,6 +25,7 @@ apps-cashier-running:
       - user_service: apps-pod-running
       - user_service: apps-cashier-quiescent
       - file: apps-cashier-quadlet
+      - file: apps-registry-auth
       - file: apps-secret-cashier-secrets-env
       - file: apps-secret-cashier-plan-token-env
       - file: apps-secret-cashier-synapse-token-env
